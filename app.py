@@ -59,6 +59,10 @@ if 'credentials' not in st.session_state:
         except Exception as e:
             st.error(f"Error during authentication: {e}")
     else:
+        # Clear previous state if it exists
+        if 'state' in st.session_state:
+            del st.session_state['state']
+
         # Check if the token file exists
         if os.path.exists('token.pickle'):
             with open('token.pickle', 'rb') as token:
