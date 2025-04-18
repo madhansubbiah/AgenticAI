@@ -8,7 +8,7 @@ from googleapiclient.discovery import build
 from google.auth.transport.requests import Request
 from transformers import pipeline
 
-# Allow insecure transport for local testing (remove in prod)
+# Allow insecure transport for local testing
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
 
 # Load credentials
@@ -36,7 +36,7 @@ def authenticate_web():
     return authorization_url, flow, state
 
 # --- OAuth Callback Handling ---
-query_params = st.experimental_get_query_params()
+query_params = st.query_params
 
 if 'code' in query_params and 'credentials' not in st.session_state:
     auth_code = query_params.get('code')[0]
@@ -71,8 +71,8 @@ if 'code' in query_params and 'credentials' not in st.session_state:
             st.success("✅ Successfully authenticated!")
 
             # Clear query params and refresh page
-            st.experimental_set_query_params()
-            st.experimental_rerun()
+            st.query_params.clear()
+            st.rerun()
 
         except Exception as e:
             st.error(f"❌ Authentication failed: {e}")
