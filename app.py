@@ -7,6 +7,7 @@ from transformers import pipeline
 from google.auth.transport.requests import Request
 import pickle
 
+# Allow insecure transport for testing purposes (not recommended for production)
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
 
 # Load credentials from the JSON file
@@ -44,13 +45,17 @@ if 'credentials' not in st.session_state:
 
         # Fetch the token using the authorization code from the query parameters
         try:
-            flow.fetch_token(authorization_response=st.query_params['code'])
-            creds = flow.credentials
-            st.session_state.credentials = creds
-            
-            with open('token.pickle', 'wb') as token:
-                pickle.dump(creds, token)
-            st.success("Authenticated successfully!")
+            # Ensure the state is stored in session state for validation
+            if 'state' in st.session_state and st.session_state['state'] == st.query_params.get('state'):
+                flow.fetch_token(authorization_response=st.query_params['code'])
+                creds = flow.credentials
+                st.session_state.credentials = creds
+                
+                with open('token.pickle', 'wb') as token:
+                    pickle.dump(creds, token)
+                st.success("Authenticated successfully!")
+            else:
+                st.error("State mismatch! Possible CSRF attack.")
         except Exception as e:
             st.error(f"Error during authentication: {e}")
     else:
