@@ -14,7 +14,7 @@ def authenticate_web():
     flow = Flow.from_client_secrets_file(
         'credentials.json',  # Path to the credentials JSON file
         scopes=SCOPES,  # Scopes defining the level of access
-        redirect_uri='http://localhost:8501'  # Redirect URI for the web application
+        redirect_uri='https://my-agentic-ai.streamlit.app/'  # Redirect URI for the web application
     )
     
     # Generate the authorization URL for the user to log in and grant access
