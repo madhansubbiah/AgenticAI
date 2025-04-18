@@ -1,123 +1,123 @@
+import os
+import json
+import streamlit as st
+from google_auth_oauthlib.flow import Flow
+from googleapiclient.discovery import build
+from transformers import pipeline
+from google.auth.transport.requests import Request
+import pickle
 
-import os  # Import the os module for operating system functionalities
-import json  # Import the json module for handling JSON data
-import streamlit as st  # Import Streamlit for building the web app
-from google_auth_oauthlib.flow import Flow  # Import Flow for OAuth 2.0 authorization
-from googleapiclient.discovery import build  # Import build to create a service for Google APIs
-from transformers import pipeline  # Import pipeline for using Hugging Face models
-from google.auth.transport.requests import Request  # Import Request for making HTTP requests
-import pickle  # Import pickle for serializing and deserializing Python objects
-
-# Allow insecure transport for testing purposes (not recommended for production)
+# Allow insecure transport (development only)
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
 
-# Load credentials from the JSON file containing OAuth 2.0 client secrets
+# Load OAuth credentials
 with open('credentials.json') as f:
-    credentials_data = json.load(f)  # Parse the JSON file into a Python dictionary
+    credentials_data = json.load(f)
 
-# Extract the redirect URI from the credentials data
-redirect_uri = credentials_data['web']['redirect_uris'][0]  # Ensure this is HTTPS
+redirect_uri = credentials_data['web']['redirect_uris'][0]
+SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
 
-# Define the scopes for Google Calendar API access
-SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']  # Read-only access to calendar
-
-# Function to authenticate with Google Calendar
 def authenticate_web():
-    # Create an OAuth 2.0 flow object using the client secrets file and defined scopes
     flow = Flow.from_client_secrets_file(
         'credentials.json',
         scopes=SCOPES,
-        redirect_uri=redirect_uri  # Set the redirect URI
+        redirect_uri=redirect_uri
     )
-    
-    # Generate the authorization URL and state parameter
     authorization_url, state = flow.authorization_url(access_type='offline')
-    return authorization_url, flow, state  # Return the authorization URL, flow object, and state
+    return authorization_url, flow, state
 
-# Streamlit app title
-st.title("Google Calendar Reader with Hugging Face Transformers")  # Set the title of the app
-
-# Print the redirect URI for reference
+st.title("Google Calendar Reader with Hugging Face Transformers")
 st.write(f"Redirect URI: {redirect_uri}")
 
-# Step 1: Authenticate with Google
-if 'credentials' not in st.session_state:  # Check if credentials are not already stored in session state
-    if 'code' in st.query_params:  # Check if the authorization code is present in the query parameters
-        flow = authenticate_web()[1]  # Get the flow object from the authentication function
-        st.write(f"Query Params: {st.query_params}")  # Log the query parameters for debugging
-
-        # Log the received state from the query parameters
+# Step 1: Authenticate
+if 'credentials' not in st.session_state:
+    if 'code' in st.query_params:
+        code = st.query_params['code']
         received_state = st.query_params.get('state')
+        st.write(f"Query Params: {st.query_params}")
         st.write(f"Received State: {received_state}")
 
-        # Log the stored state for comparison
-        stored_state = st.session_state.get('state')
+        # Load the stored state from file
+        if os.path.exists('state_temp.json'):
+            with open('state_temp.json', 'r') as f:
+                stored_state = json.load(f).get('state')
+            os.remove('state_temp.json')
+        else:
+            stored_state = None
+
         st.write(f"Stored State: {stored_state}")
 
-        # Fetch the token using the authorization code from the query parameters
-        try:
-            # Ensure the stored state matches the received state for validation
-            if stored_state and stored_state == received_state:
-                flow.fetch_token(authorization_response=st.query_params['code'])  # Exchange code for token
-                creds = flow.credentials  # Get the credentials from the flow
-                st.session_state.credentials = creds  # Store the credentials in session state
-                
-                # Save the credentials to a file for future use
-                with open('token.pickle', 'wb') as token:
-                    pickle.dump(creds, token)  # Serialize and save the credentials
-                st.success("Authenticated successfully!")  # Display success message
-            else:
-                st.error("State mismatch! Possible CSRF attack.")  # Display error for state mismatch
-        except Exception as e:
-            st.error(f"Error during authentication: {e}")  # Display any errors that occur during authentication
-    else:
-        # Clear previous state if it exists
-        if 'state' in st.session_state:
-            del st.session_state['state']  # Remove the state from session state
+        if stored_state and stored_state == received_state:
+            # Recreate the flow with same redirect URI and scopes
+            flow = Flow.from_client_secrets_file(
+                'credentials.json',
+                scopes=SCOPES,
+                redirect_uri=redirect_uri
+            )
+            # Rebuild the flow state (required for validation)
+            flow.fetch_token(authorization_response=st.experimental_get_query_params())
 
-        # Check if the token file exists
+            creds = flow.credentials
+            st.session_state.credentials = creds
+            with open('token.pickle', 'wb') as token:
+                pickle.dump(creds, token)
+            st.success("Authenticated successfully!")
+        else:
+            st.error("State mismatch! Possible CSRF attack.")
+    else:
+        # Try loading token from previous session
         if os.path.exists('token.pickle'):
             with open('token.pickle', 'rb') as token:
-                creds = pickle.load(token)  # Load the credentials from the file
-            if creds and creds.valid:  # Check if the credentials are valid
-                st.session_state.credentials = creds  # Store the valid credentials in session state
-            elif creds and creds.expired and creds.refresh_token:  # Check if the credentials are expired but can be refreshed
-                creds.refresh(Request())  # Refresh the credentials
-                st.session_state.credentials = creds  # Store the refreshed credentials
+                creds = pickle.load(token)
+            if creds and creds.valid:
+                st.session_state.credentials = creds
+            elif creds and creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+                st.session_state.credentials = creds
                 with open('token.pickle', 'wb') as token:
-                    pickle.dump(creds, token)  # Save the refreshed credentials to the file
+                    pickle.dump(creds, token)
             else:
-                # Generate the authorization URL and store the state
-                authorization_url, flow, state = authenticate_web()  # Get the authorization URL and flow
-                st.session_state.state = state  # Store the state in session state
-                st.write(f"[Click here to authorize]({authorization_url})")  # Provide a link to authorize
+                authorization_url, flow, state = authenticate_web()
+                # Save state to file
+                with open('state_temp.json', 'w') as f:
+                    json.dump({'state': state}, f)
+                st.write(f"[Click here to authorize]({authorization_url})")
         else:
-            # Generate the authorization URL and store the state
-            authorization_url, flow, state = authenticate_web()  # Get the authorization URL and flow
-            st.session_state.state = state  # Store the state in session state
-            st.write(f"[Click here to authorize]({authorization_url})")  # Provide a link to authorize
+            authorization_url, flow, state = authenticate_web()
+            # Save state to file
+            with open('state_temp.json', 'w') as f:
+                json.dump({'state': state}, f)
+            st.write(f"[Click here to authorize]({authorization_url})")
+
+# Step 2: Display events and summarize
 else:
-    creds = st.session_state.credentials  # Retrieve the stored credentials from session state
-    service = build('calendar', 'v3', credentials=creds)  # Build the Google Calendar service
+    creds = st.session_state.credentials
+    service = build('calendar', 'v3', credentials=creds)
 
-    # Step 2: Read events from Google Calendar
-    events_result = service.events().list(calendarId='primary', maxResults=10, singleEvents=True,
-                                          orderBy='startTime').execute()  # Fetch upcoming events
-    events = events_result.get('items', [])  # Get the list of events
+    events_result = service.events().list(
+        calendarId='primary',
+        maxResults=10,
+        singleEvents=True,
+        orderBy='startTime'
+    ).execute()
 
-    if not events:  # Check if there are no upcoming events
-        st.write('No upcoming events found.')  # Display message if no events are found
+    events = events_result.get('items', [])
+
+    if not events:
+        st.write('No upcoming events found.')
     else:
-        st.write("Upcoming events:")  # Display header for upcoming events
-        for event in events:  # Iterate through the list of events
-            start = event['start'].get('dateTime', event['start'].get('date'))  # Get the start time of the event
-            st.write(f"{start}: {event['summary']}")  # Display the event summary and start time
+        st.write("Upcoming events:")
+        event_texts = []
+        for event in events:
+            start = event['start'].get('dateTime', event['start'].get('date'))
+            summary = event.get('summary', 'No Title')
+            st.write(f"{start}: {summary}")
+            event_texts.append(f"{start}: {summary}")
 
-        # Step 3: Process events with Hugging Face Transformers
-        st.write("Processing events with Hugging Face Transformers...")  # Display processing message
-        summarizer = pipeline("summarization", model="facebook/bart-large-cnn")  # Load the summarization model
-        event_summaries = "\n".join([f"{start}: {event['summary']}" for event in events])  # Create a summary of events
-        prompt = f"Here are my upcoming events:\n{event_summaries}\nCan you summarize these events for me?"  # Create a prompt for summarization
-        response = summarizer(prompt, max_length=50, min_length=25, do_sample=False)  # Get the summary from the model
-        st.write("Model Response:")  # Display header for model response
-        st.write(response[0]['summary_text'])  # Display the summarized text from the model
+        # Step 3: Use Hugging Face summarization
+        st.write("Processing events with Hugging Face Transformers...")
+        summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
+        prompt = f"Here are my upcoming events:\n" + "\n".join(event_texts) + "\nCan you summarize these?"
+        response = summarizer(prompt, max_length=50, min_length=25, do_sample=False)
+        st.write("Model Response:")
+        st.write(response[0]['summary_text'])
