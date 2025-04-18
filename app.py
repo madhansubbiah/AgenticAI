@@ -7,6 +7,8 @@ from transformers import pipeline
 from google.auth.transport.requests import Request
 import pickle
 
+os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
+
 # Load credentials from the JSON file
 with open('credentials.json') as f:
     credentials_data = json.load(f)
