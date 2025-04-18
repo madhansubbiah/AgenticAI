@@ -1,10 +1,18 @@
 import os  # Import the os module for interacting with the operating system
+import json  # Import json to work with JSON data
 import streamlit as st  # Import Streamlit for creating the web application
 from google_auth_oauthlib.flow import Flow  # Import Flow for handling OAuth 2.0 authorization
 from googleapiclient.discovery import build  # Import build to create a service object for Google APIs
 from transformers import pipeline  # Import pipeline from transformers for using Hugging Face models
 from google.auth.transport.requests import Request  # Import Request for refreshing tokens
 import pickle  # Import pickle for saving and loading credentials
+
+# Load credentials from the JSON file
+with open('credentials.json') as f:
+    credentials_data = json.load(f)
+
+# Extract the redirect URI
+redirect_uri = credentials_data['web']['redirect_uris'][0]  # Get the first redirect URI
 
 # Define the scopes for Google Calendar API access
 SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']  # Request read-only access to the user's calendar
@@ -14,7 +22,7 @@ def authenticate_web():
     flow = Flow.from_client_secrets_file(
         'credentials.json',  # Path to the credentials JSON file
         scopes=SCOPES,  # Scopes defining the level of access
-        redirect_uri='https://my-agentic-ai.streamlit.app'  # Redirect URI for the web application
+        redirect_uri=redirect_uri  # Use the extracted redirect URI
     )
     
     # Generate the authorization URL for the user to log in and grant access
@@ -24,16 +32,15 @@ def authenticate_web():
 # Streamlit app title
 st.title("Google Calendar Reader with Hugging Face Transformers")
 
+# Print the redirect URI from the credentials file
+st.write(f"Redirect URI: {redirect_uri}")  # This should print the correct redirect URI
+
 # Step 1: Authenticate with Google
 if 'credentials' not in st.session_state:  # Check if credentials are already stored in session state
     if 'code' in st.query_params:  # Check if the authorization code is in the query parameters
         flow = authenticate_web()[1]  # Get the flow object from the authenticate_web function
-        # Fetch the access token using the authorization code received from Google
-        st.write(f"Query Params: {st.query_params}")
-        st.write(f"Redirect URI: {st.query_params['code']}")
-        st.write(f"Redirect URI: https://my-agentic-ai.streamlit.app") 
-        st.write(f"Redirect URI from the program: {redirect_uri}")  # Print the redirect URI from the credentials file
-        flow.fetch_token(authorization_response=st.query_params['code'])
+        st.write(f"Query Params: {st.query_params}")  # Log the query parameters
+        flow.fetch_token(authorization_response=st.query_params['code'])  # Fetch the access token
         creds = flow.credentials  # Get the credentials (access and refresh tokens)
         st.session_state.credentials = creds  # Store credentials in session state for later use
         
