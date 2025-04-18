@@ -22,7 +22,7 @@ SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
 st.title("📅 Google Calendar Reader with Transformers")
 st.write(f"Redirect URI: `{redirect_uri}`")
 
-# Helper: OAuth flow builder
+# Step 1 - Helper for OAuth URL
 def authenticate_web():
     flow = Flow.from_client_secrets_file(
         'credentials.json',
@@ -35,51 +35,48 @@ def authenticate_web():
     )
     return authorization_url, flow, state
 
-# --- OAuth Callback Handling ---
+# Step 2 - Check if redirected from Google
 query_params = st.query_params
-
 if 'code' in query_params and 'credentials' not in st.session_state:
-    auth_code = query_params.get('code')[0]
-    received_state = query_params.get('state', [None])[0]
+    code = query_params.get('code')
+    state = query_params.get('state')
 
-    if os.path.exists('state_temp.json'):
-        with open('state_temp.json', 'r') as f:
-            stored_state = json.load(f).get('state')
-        os.remove('state_temp.json')
+    # Load the expected state
+    if os.path.exists("state_temp.json"):
+        with open("state_temp.json") as f:
+            saved_state = json.load(f).get("state")
+        os.remove("state_temp.json")
     else:
-        stored_state = None
+        saved_state = None
 
-    if stored_state == received_state:
-        # Step 1: Rebuild flow
+    if saved_state == state:
         flow = Flow.from_client_secrets_file(
             'credentials.json',
             scopes=SCOPES,
             redirect_uri=redirect_uri
         )
 
-        # Step 2: Rebuild authorization response URL
-        authorization_response = f"{redirect_uri}?code={auth_code}&state={received_state}"
+        # Rebuild full URL
+        full_redirect_url = f"{redirect_uri}?code={code}&state={state}"
 
         try:
-            flow.fetch_token(authorization_response=authorization_response)
+            flow.fetch_token(authorization_response=full_redirect_url)
             creds = flow.credentials
             st.session_state.credentials = creds
 
+            # Save token
             with open('token.pickle', 'wb') as token:
                 pickle.dump(creds, token)
 
-            st.success("✅ Successfully authenticated!")
-
-            # Clear query params and refresh page
+            # Clear query and rerun
             st.query_params.clear()
             st.rerun()
-
         except Exception as e:
-            st.error(f"❌ Authentication failed: {e}")
+            st.error(f"❌ Auth Error: {e}")
     else:
-        st.error("⚠️ State mismatch! Possible CSRF attack.")
+        st.error("⚠️ Invalid state. Possible CSRF attack.")
 
-# --- Load from token.pickle if not in session ---
+# Step 3 - Try to load saved token
 if 'credentials' not in st.session_state:
     if os.path.exists('token.pickle'):
         with open('token.pickle', 'rb') as token:
@@ -93,16 +90,16 @@ if 'credentials' not in st.session_state:
             with open('token.pickle', 'wb') as token:
                 pickle.dump(creds, token)
 
-# --- Auth UI ---
+# Step 4 - Show Auth button
 if 'credentials' not in st.session_state:
-    authorization_url, flow, state = authenticate_web()
-    with open('state_temp.json', 'w') as f:
-        json.dump({'state': state}, f)
+    auth_url, flow, state = authenticate_web()
+    with open("state_temp.json", "w") as f:
+        json.dump({"state": state}, f)
 
     st.markdown(
         f"""
         <div style="text-align:center;">
-            <a href="{authorization_url}" target="_self">
+            <a href="{auth_url}" target="_self">
                 <button style="padding: 0.75em 1.5em; font-size: 1rem; background-color: #0b8043; color: white; border: none; border-radius: 5px; cursor: pointer;">
                     🔐 Click here to authorize Google Calendar
                 </button>
@@ -111,10 +108,10 @@ if 'credentials' not in st.session_state:
         """,
         unsafe_allow_html=True
     )
-    st.info("Please authorize access to your Google Calendar.")
+    st.info("Please authorize Google Calendar access.")
     st.stop()
 
-# --- Authenticated: Access Calendar ---
+# Step 5 - You're authenticated. Fetch events
 creds = st.session_state.credentials
 service = build('calendar', 'v3', credentials=creds)
 
@@ -128,20 +125,21 @@ events_result = service.events().list(
 events = events_result.get('items', [])
 
 if not events:
-    st.write("📭 No upcoming events found.")
+    st.write("📭 No upcoming events.")
 else:
-    st.write("📅 Upcoming Events:")
+    st.subheader("📅 Upcoming Events:")
     event_texts = []
     for event in events:
         start = event['start'].get('dateTime', event['start'].get('date'))
         summary = event.get('summary', 'No Title')
-        st.markdown(f"• **{start}** — {summary}")
+        st.markdown(f"- **{start}** — {summary}")
         event_texts.append(f"{start}: {summary}")
 
-    # --- Summarization ---
-    st.write("🧠 Summarizing events using Hugging Face Transformers...")
+    # Summarize
+    st.write("🧠 Summarizing using Hugging Face Transformers...")
     summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
     prompt = "Here are my upcoming events:\n" + "\n".join(event_texts)
-    response = summarizer(prompt, max_length=50, min_length=25, do_sample=False)
+    result = summarizer(prompt, max_length=60, min_length=25, do_sample=False)
+
     st.success("📋 Summary:")
-    st.write(response[0]['summary_text'])
+    st.write(result[0]['summary_text'])
