@@ -43,10 +43,14 @@ if 'credentials' not in st.session_state:
         flow = authenticate_web()[1]
         st.write(f"Query Params: {st.query_params}")
 
+        # Log the state received in the query parameters
+        received_state = st.query_params.get('state')
+        st.write(f"Received State: {received_state}")
+
         # Fetch the token using the authorization code from the query parameters
         try:
             # Ensure the state is stored in session state for validation
-            if 'state' in st.session_state and st.session_state['state'] == st.query_params.get('state'):
+            if 'state' in st.session_state and st.session_state['state'] == received_state:
                 flow.fetch_token(authorization_response=st.query_params['code'])
                 creds = flow.credentials
                 st.session_state.credentials = creds
