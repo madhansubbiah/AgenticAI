@@ -26,7 +26,7 @@ def authenticate_web():
     )
     
     authorization_url, state = flow.authorization_url(access_type='offline')
-    return authorization_url, flow
+    return authorization_url, flow, state  # Return the authorization URL, flow object, and state
 
 # Streamlit app title
 st.title("Google Calendar Reader with Hugging Face Transformers")
@@ -39,15 +39,20 @@ if 'credentials' not in st.session_state:
     if 'code' in st.query_params:
         flow = authenticate_web()[1]
         st.write(f"Query Params: {st.query_params}")
-        #flow.fetch_token(authorization_response=st.query_params['code'])
-        flow.fetch_token(authorization_response=redirect_uri)
-        creds = flow.credentials
-        st.session_state.credentials = creds
-        
-        with open('token.pickle', 'wb') as token:
-            pickle.dump(creds, token)
-        st.success("Authenticated successfully!")
+
+        # Fetch the token using the authorization code from the query parameters
+        try:
+            flow.fetch_token(authorization_response=st.query_params['code'])
+            creds = flow.credentials
+            st.session_state.credentials = creds
+            
+            with open('token.pickle', 'wb') as token:
+                pickle.dump(creds, token)
+            st.success("Authenticated successfully!")
+        except Exception as e:
+            st.error(f"Error during authentication: {e}")
     else:
+        # Check if the token file exists
         if os.path.exists('token.pickle'):
             with open('token.pickle', 'rb') as token:
                 creds = pickle.load(token)
@@ -59,10 +64,12 @@ if 'credentials' not in st.session_state:
                 with open('token.pickle', 'wb') as token:
                     pickle.dump(creds, token)
             else:
-                authorization_url = authenticate_web()[0]
+                authorization_url, flow, state = authenticate_web()
+                st.session_state.state = state  # Store the state in session state
                 st.write(f"[Click here to authorize]({authorization_url})")
         else:
-            authorization_url = authenticate_web()[0]
+            authorization_url, flow, state = authenticate_web()
+            st.session_state.state = state  # Store the state in session state
             st.write(f"[Click here to authorize]({authorization_url})")
 else:
     creds = st.session_state.credentials
