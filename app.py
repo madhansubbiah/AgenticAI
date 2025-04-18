@@ -39,7 +39,8 @@ if 'credentials' not in st.session_state:
     if 'code' in st.query_params:
         flow = authenticate_web()[1]
         st.write(f"Query Params: {st.query_params}")
-        flow.fetch_token(authorization_response=st.query_params['code'])
+        #flow.fetch_token(authorization_response=st.query_params['code'])
+        flow.fetch_token(authorization_response=redirect_uri)
         creds = flow.credentials
         st.session_state.credentials = creds
         
