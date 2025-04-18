@@ -31,6 +31,8 @@ if 'credentials' not in st.session_state:  # Check if credentials are already st
         # Fetch the access token using the authorization code received from Google
         st.write(f"Query Params: {st.query_params}")
         st.write(f"Redirect URI: {st.query_params['code']}")
+        st.write(f"Redirect URI: https://my-agentic-ai.streamlit.app") 
+        st.write(f"Redirect URI from the program: {redirect_uri}")  # Print the redirect URI from the credentials file
         flow.fetch_token(authorization_response=st.query_params['code'])
         creds = flow.credentials  # Get the credentials (access and refresh tokens)
         st.session_state.credentials = creds  # Store credentials in session state for later use
