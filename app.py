@@ -8,7 +8,7 @@ from google.auth.transport.requests import Request
 import pickle
 
 # Allow insecure transport for testing purposes (not recommended for production)
-os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
+#os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
 
 # Load credentials from the JSON file
 with open('credentials.json') as f:
