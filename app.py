@@ -83,10 +83,12 @@ if 'credentials' not in st.session_state:
                 with open('token.pickle', 'wb') as token:
                     pickle.dump(creds, token)
             else:
+                # Generate the authorization URL and store the state
                 authorization_url, flow, state = authenticate_web()
                 st.session_state.state = state  # Store the state in session state
                 st.write(f"[Click here to authorize]({authorization_url})")
         else:
+            # Generate the authorization URL and store the state
             authorization_url, flow, state = authenticate_web()
             st.session_state.state = state  # Store the state in session state
             st.write(f"[Click here to authorize]({authorization_url})")
