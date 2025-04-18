@@ -29,6 +29,7 @@ if 'credentials' not in st.session_state:  # Check if credentials are already st
     if 'code' in st.query_params:  # Check if the authorization code is in the query parameters
         flow = authenticate_web()[1]  # Get the flow object from the authenticate_web function
         # Fetch the access token using the authorization code received from Google
+        st.write(f"Redirect URI: {st.query_params['code']}")
         flow.fetch_token(authorization_response=st.query_params['code'])
         creds = flow.credentials  # Get the credentials (access and refresh tokens)
         st.session_state.credentials = creds  # Store credentials in session state for later use
