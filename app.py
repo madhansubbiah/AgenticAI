@@ -1,23 +1,192 @@
-import streamlit as st
+import os
 import json
+import pickle
 import requests
-from google_auth_oauthlib.flow import InstalledAppFlow
-from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
-from google.auth.transport.requests import Request
-from google.oauth2 import service_account
+import streamlit as st
 from datetime import datetime, timedelta
-import pytz
+from urllib.parse import urlencode
+from google_auth_oauthlib.flow import Flow
+from googleapiclient.discovery import build
+from google.auth.transport.requests import Request
+from transformers import pipeline
+from langgraph import LangGraph
+from langchain.chains import LLMChain
+from langchain.prompts import PromptTemplate
+from langchain.llms import OpenAI
 
-# Load credentials from the credentials.json file
-with open("credentials.json") as f:
-    creds_data = json.load(f)
+# Set up environment
+os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
 
-# Extract weather and news API keys from credentials.json
-WEATHER_API_KEY = creds_data["WEATHER_API_KEY"]
-NEWS_API_KEY = creds_data["NEWS_API_KEY"]
+# Load credentials
+with open('credentials.json') as f:
+    credentials_data = json.load(f)
 
-# List of cities in the format required
+redirect_uri = credentials_data['web']['redirect_uris'][0]
+SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
+NEWS_API_KEY = credentials_data.get('NEWS_API_KEY', '')
+WEATHER_API_KEY = credentials_data.get('WEATHER_API_KEY', '')
+
+# Initialize Streamlit
+st.title("🧠 AI Daily Assistant")
+st.write(f"🔁 Redirect URI: {redirect_uri}")
+
+# Authenticate user
+def authenticate_web():
+    flow = Flow.from_client_secrets_file(
+        'credentials.json',
+        scopes=SCOPES,
+        redirect_uri=redirect_uri
+    )
+    authorization_url, state = flow.authorization_url(access_type='offline', include_granted_scopes='true')
+    return authorization_url, flow, state
+
+# Handle OAuth callback
+if 'code' in st.query_params and 'credentials' not in st.session_state:
+    received_state = st.query_params.get('state')
+    if os.path.exists('state_temp.json'):
+        with open('state_temp.json', 'r') as f:
+            stored_state = json.load(f).get('state')
+        os.remove('state_temp.json')
+    else:
+        stored_state = None
+
+    if stored_state == received_state:
+        flow = Flow.from_client_secrets_file(
+            'credentials.json',
+            scopes=SCOPES,
+            redirect_uri=redirect_uri
+        )
+        query_dict = st.query_params
+        query_string = urlencode(query_dict, doseq=True)
+        authorization_response = f"{redirect_uri}?{query_string}"
+
+        try:
+            flow.fetch_token(authorization_response=authorization_response)
+            creds = flow.credentials
+            st.session_state.credentials = creds
+
+            with open('token.pickle', 'wb') as token:
+                pickle.dump(creds, token)
+
+            st.success("✅ Successfully authenticated!")
+        except Exception as e:
+            st.error(f"Authentication failed: {e}")
+    else:
+        st.error("State mismatch! Possible CSRF attack.")
+
+# Load saved credentials
+if 'credentials' not in st.session_state:
+    if os.path.exists('token.pickle'):
+        with open('token.pickle', 'rb') as token:
+            creds = pickle.load(token)
+
+        if creds and creds.valid:
+            st.session_state.credentials = creds
+        elif creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+            st.session_state.credentials = creds
+            with open('token.pickle', 'wb') as token:
+                pickle.dump(creds, token)
+
+# Prompt login
+if 'credentials' not in st.session_state:
+    authorization_url, flow, state = authenticate_web()
+    with open('state_temp.json', 'w') as f:
+        json.dump({'state': state}, f)
+
+    st.markdown(
+        f"""
+        <div style="text-align:center;">
+            <a href="{authorization_url}" target="_self">
+                <button style="padding: 0.75em 1.5em; font-size: 1rem; background-color: #0b8043; color: white; border: none; border-radius: 5px; cursor: pointer;">
+                    🔐 Click here to authorize Google Calendar
+                </button>
+            </a>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+    st.info("Please authorize access to your Google Calendar.")
+    st.stop()
+
+# Fetch calendar events
+creds = st.session_state.credentials
+service = build('calendar', 'v3', credentials=creds)
+
+now = datetime.utcnow()
+today_start = datetime(now.year, now.month, now.day, tzinfo=datetime.now().astimezone().tzinfo)
+tomorrow_end = today_start + timedelta(days=2)
+
+events_result = service.events().list(
+    calendarId='primary',
+    timeMin=today_start.isoformat(),
+    timeMax=tomorrow_end.isoformat(),
+    singleEvents=True,
+    orderBy='startTime'
+).execute()
+
+events = events_result.get('items', [])
+
+st.subheader("📅 Today's & Tomorrow's Events")
+event_texts = []
+for event in events:
+    try:
+        start = event['start'].get('dateTime', event['start'].get('date'))
+        summary = event.get('summary', 'No Title')
+        start_dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
+        if today_start <= start_dt <= tomorrow_end:
+            st.write(f"• {start_dt.strftime('%Y-%m-%d %H:%M')} — {summary}")
+            event_texts.append(f"{start_dt.strftime('%Y-%m-%d %H:%M')} — {summary}")
+    except Exception as e:
+        st.warning(f"Unexpected error with event: {e}. Event: {event}")
+
+# LangGraph workflow for summarization
+def create_langgraph_summary(event_texts, news_texts):
+    langgraph = LangGraph()
+    
+    # Define a simple LangGraph workflow to summarize both events and news
+    langgraph.add_node("event_summary", lambda: summarize_texts(event_texts))
+    langgraph.add_node("news_summary", lambda: summarize_texts(news_texts))
+    
+    # Run the LangGraph flow
+    result = langgraph.run()
+    return result
+
+# Summarization function
+def summarize_texts(texts):
+    summarizer = pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
+    return summarizer(" ".join(texts), max_length=60, min_length=25, do_sample=False)[0]['summary_text']
+
+# Show LangGraph summary of events and news
+if event_texts:
+    st.subheader("✨ Calendar Summary")
+    event_summary = create_langgraph_summary(event_texts, [])
+    st.write(event_summary["event_summary"])
+
+# Show top US news
+st.subheader("📰 Today's Top News")
+news_url = f"https://newsapi.org/v2/top-headlines?country=us&apiKey={NEWS_API_KEY}"
+response = requests.get(news_url)
+news_data = response.json()
+
+articles = news_data.get('articles', [])[:5]
+news_texts = []
+
+if not articles:
+    st.warning("No news articles found.")
+else:
+    for article in articles:
+        st.markdown(f"**• {article['title']}**")
+        news_texts.append(article['title'] + ". " + (article.get('description') or ''))
+
+# LangGraph workflow for news summary
+if news_texts:
+    st.subheader("🧠 News Summary")
+    news_summary = create_langgraph_summary([], news_texts)
+    st.write(news_summary["news_summary"])
+
+# Weather input after calendar and news
+st.subheader("🌤️ Weather Forecast")
 cities = [
     "New York", "Los Angeles", "Chicago", "Houston", "Phoenix", "Philadelphia", "San Antonio", "San Diego", "Dallas", "San Jose",
     "Austin", "Jacksonville", "Fort Worth", "Columbus", "Indianapolis", "Charlotte", "San Francisco", "Seattle", "Denver", "Washington D.C.",
@@ -25,86 +194,22 @@ cities = [
     "Milwaukee", "Albuquerque", "Tucson", "Fresno", "Mesa", "Sacramento", "Kansas City", "Long Beach", "Atlanta", "Raleigh",
     "Miami", "Omaha", "Cleveland", "Tulsa", "Minneapolis", "Arlington", "New Orleans", "Wichita", "Bakersfield", "Cincinnati"
 ]
+selected_city = st.selectbox("Select a city to see the current weather:", cities)
 
-# Function to get weather data
-def get_weather(city):
-    url = f"http://api.weatherapi.com/v1/current.json?key={WEATHER_API_KEY}&q={city}"
-    try:
-        response = requests.get(url)
-        data = response.json()
-        if 'error' in data:
-            return f"Error: {data['error']['message']}"
-        weather_info = data['current']
-        return f"Weather in {city}: {weather_info['temp_c']}°C, {weather_info['condition']['text']}"
-    except requests.exceptions.RequestException as e:
-        return f"Error fetching weather: {e}"
+if selected_city:
+    weather_url = f"http://api.weatherapi.com/v1/current.json?key={WEATHER_API_KEY}&q={selected_city}"
+    weather_response = requests.get(weather_url)
 
-# Function to get Google Calendar events
-def get_calendar_events(credentials):
-    service = build("calendar", "v3", credentials=credentials)
-    now = datetime.utcnow().isoformat() + "Z"  # 'Z' indicates UTC time
-    events = service.events().list(calendarId='primary', timeMin=now, maxResults=10, singleEvents=True, orderBy='startTime').execute()
-    return events.get('items', [])
+    if weather_response.status_code == 200:
+        weather_data = weather_response.json()
+        condition = weather_data['current']['condition']['text']
+        temp_c = weather_data['current']['temp_c']
+        feels_like = weather_data['current']['feelslike_c']
+        humidity = weather_data['current']['humidity']
 
-# Function to authenticate with Google
-def google_authenticate():
-    credentials = None
-    if st.session_state.get("credentials"):
-        credentials = service_account.Credentials.from_service_account_info(st.session_state["credentials"])
-    
-    if not credentials or credentials.expired:
-        if credentials and credentials.expired and credentials.refresh_token:
-            credentials.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file(
-                "credentials.json",
-                scopes=["https://www.googleapis.com/auth/calendar.readonly"]
-            )
-            credentials = flow.run_local_server(port=0)
-            st.session_state["credentials"] = credentials.to_json()
-    return credentials
-
-# Main app logic
-def main():
-    st.title("Agentic AI - Personal Assistant")
-
-    # Step 1: Ask the user to choose a city for weather information
-    city = st.selectbox("Choose your city for weather info:", cities)
-
-    # Step 2: Google Calendar Authentication
-    st.write("🔐 Please authorize access to your Google Calendar:")
-    credentials = google_authenticate()
-
-    # Fetch and display today's events
-    events = get_calendar_events(credentials)
-    if events:
-        st.write("📅 Today's & Tomorrow's Events:")
-        for event in events:
-            start = event['start'].get('dateTime', event['start'].get('date'))
-            start_dt = datetime.fromisoformat(start).astimezone(pytz.timezone('America/New_York'))
-            if start_dt > datetime.now(pytz.timezone('America/New_York')):
-                st.write(f"Event: {event['summary']}, Time: {start_dt.strftime('%Y-%m-%d %H:%M:%S')}")
+        st.markdown(f"**City:** {selected_city}")
+        st.markdown(f"**Condition:** {condition}")
+        st.markdown(f"**Temperature:** {temp_c}°C (Feels like {feels_like}°C)")
+        st.markdown(f"**Humidity:** {humidity}%")
     else:
-        st.write("No upcoming events found.")
-
-    # Step 3: Display Top News
-    st.write("📰 Today's Top News:")
-    news_url = f"https://newsapi.org/v2/top-headlines?country=us&apiKey={NEWS_API_KEY}"
-    try:
-        news_response = requests.get(news_url)
-        news_data = news_response.json()
-        if news_data["status"] == "ok":
-            for article in news_data["articles"][:5]:
-                st.write(f"• {article['title']} - {article['source']['name']}")
-        else:
-            st.write("Error fetching news.")
-    except requests.exceptions.RequestException as e:
-        st.write(f"Error fetching news: {e}")
-
-    # Step 4: Display Weather Information
-    st.write("🌤 Weather Information:")
-    weather_info = get_weather(city)
-    st.write(weather_info)
-
-if __name__ == "__main__":
-    main()
+        st.error(f"Could not fetch weather data for {selected_city}. Please try again.")
