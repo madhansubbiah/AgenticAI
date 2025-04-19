@@ -155,19 +155,21 @@ class SummaryState(TypedDict):
 def create_langgraph_summary(event_texts, news_texts):
     # Define the summarize_event_node function here
     def summarize_event_node(state: SummaryState) -> dict:
-        return {"event_summary": summarize_texts(state.get("events", []))}
+        return {"event_summary_output": summarize_texts(state.get("events", []))}
 
     # Define the summarize_news_node function here
     def summarize_news_node(state: SummaryState) -> dict:
-        return {"news_summary": summarize_texts(state.get("news", []))}
+        return {"news_summary_output": summarize_texts(state.get("news", []))}
 
     builder = StateGraph(SummaryState)
-    builder.add_node("event_summary", summarize_event_node)
-    builder.add_node("news_summary", summarize_news_node)
+    
+    # Ensure unique node names to avoid 'already used' errors
+    builder.add_node("event_summary_output", summarize_event_node)
+    builder.add_node("news_summary_output", summarize_news_node)
 
-    builder.set_entry_point("event_summary")
-    builder.add_edge("event_summary", "news_summary")
-    builder.set_finish_point("news_summary")
+    builder.set_entry_point("event_summary_output")
+    builder.add_edge("event_summary_output", "news_summary_output")
+    builder.set_finish_point("news_summary_output")
 
     app = builder.compile()
     return app.invoke({"events": event_texts, "news": news_texts})
@@ -176,7 +178,7 @@ def create_langgraph_summary(event_texts, news_texts):
 if event_texts:
     st.subheader("✨ Calendar Summary")
     event_summary = create_langgraph_summary(event_texts, [])
-    st.write(event_summary.get("event_summary", "No summary available."))
+    st.write(event_summary.get("event_summary_output", "No summary available."))
 
 # Show top US news
 st.subheader("📰 Today's Top News")
@@ -198,7 +200,7 @@ else:
 if news_texts:
     st.subheader("🧠 News Summary")
     news_summary = create_langgraph_summary([], news_texts)
-    st.write(news_summary.get("news_summary", "No summary available."))
+    st.write(news_summary.get("news_summary_output", "No summary available."))
 
 # Weather input after calendar and news
 st.subheader("🌤️ Weather Forecast")
