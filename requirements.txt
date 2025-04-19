@@ -7,3 +7,6 @@ langchain_community
 langchain_huggingface
 transformers
 torch
+langgraph 
+openai 
+huggingface_hub
