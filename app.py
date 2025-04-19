@@ -1,119 +1,110 @@
 import streamlit as st
-from google_auth_oauthlib.flow import Flow
-from googleapiclient.discovery import build
-from datetime import datetime, timedelta
-import pytz
 import json
 import requests
-from langchain_core.runnables import RunnableLambda
-from langgraph.graph import StateGraph, END
-from langchain_core.runnables import RunnableConfig
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+from google.auth.transport.requests import Request
+from google.oauth2 import service_account
+from datetime import datetime, timedelta
+import pytz
 
-# ---- Load credentials ----
+# Load credentials from the credentials.json file
 with open("credentials.json") as f:
-    secrets = json.load(f)
+    creds_data = json.load(f)
 
-client_config = {
-    "web": secrets["web"]
-}
-NEWS_API_KEY = secrets["NEWS_API_KEY"]
-WEATHER_API_KEY = secrets["WEATHER_API_KEY"]
+# Extract weather and news API keys from credentials.json
+WEATHER_API_KEY = creds_data["WEATHER_API_KEY"]
+NEWS_API_KEY = creds_data["NEWS_API_KEY"]
 
-# ---- City Selection (Dropdown - UI) ----
-cities = ["New York", "San Francisco", "Chicago", "Houston", "Miami", "Los Angeles", "Seattle", "Dallas", "Boston", "Denver"]
-selected_city = st.selectbox("Choose your city for weather info:", cities)
+# List of cities in the format required
+cities = [
+    "New York", "Los Angeles", "Chicago", "Houston", "Phoenix", "Philadelphia", "San Antonio", "San Diego", "Dallas", "San Jose",
+    "Austin", "Jacksonville", "Fort Worth", "Columbus", "Indianapolis", "Charlotte", "San Francisco", "Seattle", "Denver", "Washington D.C.",
+    "Boston", "El Paso", "Detroit", "Nashville", "Portland", "Memphis", "Oklahoma City", "Las Vegas", "Louisville", "Baltimore",
+    "Milwaukee", "Albuquerque", "Tucson", "Fresno", "Mesa", "Sacramento", "Kansas City", "Long Beach", "Atlanta", "Raleigh",
+    "Miami", "Omaha", "Cleveland", "Tulsa", "Minneapolis", "Arlington", "New Orleans", "Wichita", "Bakersfield", "Cincinnati"
+]
 
-# ---- Google Auth ----
-if "credentials" not in st.session_state:
-    flow = Flow.from_client_config(
-        client_config=client_config,
-        scopes=["https://www.googleapis.com/auth/calendar.readonly"],
-        redirect_uri="https://my-agentic-ai.streamlit.app"
-    )
+# Function to get weather data
+def get_weather(city):
+    url = f"http://api.weatherapi.com/v1/current.json?key={WEATHER_API_KEY}&q={city}"
+    try:
+        response = requests.get(url)
+        data = response.json()
+        if 'error' in data:
+            return f"Error: {data['error']['message']}"
+        weather_info = data['current']
+        return f"Weather in {city}: {weather_info['temp_c']}°C, {weather_info['condition']['text']}"
+    except requests.exceptions.RequestException as e:
+        return f"Error fetching weather: {e}"
 
-    auth_url, _ = flow.authorization_url(prompt="consent")
-    st.write("### 🔐 Please authorize access to your Google Calendar:")
-    st.markdown(f"[Authorize]({auth_url})")
-    st.stop()
-
-# ---- Events Display Logic ----
-def fetch_calendar_events(credentials):
+# Function to get Google Calendar events
+def get_calendar_events(credentials):
     service = build("calendar", "v3", credentials=credentials)
+    now = datetime.utcnow().isoformat() + "Z"  # 'Z' indicates UTC time
+    events = service.events().list(calendarId='primary', timeMin=now, maxResults=10, singleEvents=True, orderBy='startTime').execute()
+    return events.get('items', [])
 
-    now = datetime.utcnow().isoformat() + "Z"
-    tomorrow = (datetime.utcnow() + timedelta(days=1)).isoformat() + "Z"
-
-    events_result = service.events().list(
-        calendarId='primary', timeMin=now, timeMax=tomorrow,
-        singleEvents=True, orderBy='startTime').execute()
+# Function to authenticate with Google
+def google_authenticate():
+    credentials = None
+    if st.session_state.get("credentials"):
+        credentials = service_account.Credentials.from_service_account_info(st.session_state["credentials"])
     
-    events = events_result.get('items', [])
-    event_text = "📅 **Today's & Tomorrow's Events**\n"
-    if not events:
-        event_text += "No upcoming events found."
-    else:
+    if not credentials or credentials.expired:
+        if credentials and credentials.expired and credentials.refresh_token:
+            credentials.refresh(Request())
+        else:
+            flow = InstalledAppFlow.from_client_secrets_file(
+                "credentials.json",
+                scopes=["https://www.googleapis.com/auth/calendar.readonly"]
+            )
+            credentials = flow.run_local_server(port=0)
+            st.session_state["credentials"] = credentials.to_json()
+    return credentials
+
+# Main app logic
+def main():
+    st.title("Agentic AI - Personal Assistant")
+
+    # Step 1: Ask the user to choose a city for weather information
+    city = st.selectbox("Choose your city for weather info:", cities)
+
+    # Step 2: Google Calendar Authentication
+    st.write("🔐 Please authorize access to your Google Calendar:")
+    credentials = google_authenticate()
+
+    # Fetch and display today's events
+    events = get_calendar_events(credentials)
+    if events:
+        st.write("📅 Today's & Tomorrow's Events:")
         for event in events:
             start = event['start'].get('dateTime', event['start'].get('date'))
-            start_dt = datetime.fromisoformat(start.replace('Z', '+00:00'))
-            local_start = start_dt.astimezone(pytz.timezone("America/New_York"))
-            summary = event.get("summary", "No Title")
-            event_text += f"- {local_start.strftime('%Y-%m-%d %I:%M %p')}: {summary}\n"
-    return event_text
-
-# ---- News Logic ----
-def fetch_top_news():
-    url = f"https://newsapi.org/v2/top-headlines?country=us&apiKey={NEWS_API_KEY}"
-    response = requests.get(url)
-    if response.status_code == 200:
-        news_data = response.json()
-        articles = news_data["articles"][:5]
-        news_text = "📰 **Today's Top News**\n"
-        for article in articles:
-            news_text += f"- {article['title']} - {article['source']['name']}\n"
-        return news_text
-    return "Failed to fetch news."
-
-# ---- Weather Logic ----
-def fetch_weather(city):
-    url = f"http://api.weatherapi.com/v1/current.json?key={WEATHER_API_KEY}&q={city}"
-    response = requests.get(url)
-    if response.status_code == 200:
-        data = response.json()
-        temp_c = data['current']['temp_c']
-        condition = data['current']['condition']['text']
-        return f"🌤️ **Weather in {city}:** {temp_c}°C, {condition}"
+            start_dt = datetime.fromisoformat(start).astimezone(pytz.timezone('America/New_York'))
+            if start_dt > datetime.now(pytz.timezone('America/New_York')):
+                st.write(f"Event: {event['summary']}, Time: {start_dt.strftime('%Y-%m-%d %H:%M:%S')}")
     else:
-        return f"Could not fetch weather data for {city}. Please try again."
+        st.write("No upcoming events found.")
 
-# ---- LangGraph Integration ----
-def create_graph():
-    def calendar_node(state):
-        return {"calendar": fetch_calendar_events(st.session_state.credentials)}
+    # Step 3: Display Top News
+    st.write("📰 Today's Top News:")
+    news_url = f"https://newsapi.org/v2/top-headlines?country=us&apiKey={NEWS_API_KEY}"
+    try:
+        news_response = requests.get(news_url)
+        news_data = news_response.json()
+        if news_data["status"] == "ok":
+            for article in news_data["articles"][:5]:
+                st.write(f"• {article['title']} - {article['source']['name']}")
+        else:
+            st.write("Error fetching news.")
+    except requests.exceptions.RequestException as e:
+        st.write(f"Error fetching news: {e}")
 
-    def news_node(state):
-        return {"news": fetch_top_news()}
+    # Step 4: Display Weather Information
+    st.write("🌤 Weather Information:")
+    weather_info = get_weather(city)
+    st.write(weather_info)
 
-    def weather_node(state):
-        return {"weather": fetch_weather(selected_city)}
-
-    builder = StateGraph()
-    builder.add_node("calendar", RunnableLambda(calendar_node))
-    builder.add_node("news", RunnableLambda(news_node))
-    builder.add_node("weather", RunnableLambda(weather_node))
-
-    builder.set_entry_point("calendar")
-    builder.add_edge("calendar", "news")
-    builder.add_edge("news", "weather")
-    builder.add_edge("weather", END)
-
-    graph = builder.compile()
-    return graph
-
-# ---- Run LangGraph ----
-graph = create_graph()
-result = graph.invoke({}, config=RunnableConfig())
-
-# ---- Display in order ----
-st.markdown(result["calendar"])
-st.markdown(result["news"])
-st.markdown(result["weather"])
+if __name__ == "__main__":
+    main()
