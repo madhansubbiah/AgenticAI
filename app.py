@@ -9,7 +9,6 @@ from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from google.auth.transport.requests import Request
 from transformers import pipeline
-import pytz
 
 # Environment setup
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
@@ -19,8 +18,8 @@ with open('credentials.json') as f:
     credentials_data = json.load(f)
 
 redirect_uri = credentials_data['web']['redirect_uris'][0]
-SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
 NEWS_API_KEY = credentials_data.get('NEWS_API_KEY', '')
+WEATHER_API_KEY = credentials_data.get('WEATHER_API_KEY', '')
 
 # UI Title
 st.title("🧠 AI Daily Assistant")
@@ -30,7 +29,7 @@ st.write(f"🔁 Redirect URI: {redirect_uri}")
 def authenticate_web():
     flow = Flow.from_client_secrets_file(
         'credentials.json',
-        scopes=SCOPES,
+        scopes=['https://www.googleapis.com/auth/calendar.readonly'],
         redirect_uri=redirect_uri
     )
     authorization_url, state = flow.authorization_url(access_type='offline', include_granted_scopes='true')
@@ -49,7 +48,7 @@ if 'code' in st.query_params and 'credentials' not in st.session_state:
     if stored_state == received_state:
         flow = Flow.from_client_secrets_file(
             'credentials.json',
-            scopes=SCOPES,
+            scopes=['https://www.googleapis.com/auth/calendar.readonly'],
             redirect_uri=redirect_uri
         )
         query_dict = st.query_params
@@ -111,13 +110,13 @@ creds = st.session_state.credentials
 service = build('calendar', 'v3', credentials=creds)
 
 now = datetime.utcnow()
-today_start = datetime(now.year, now.month, now.day, tzinfo=pytz.UTC)  # Set timezone to UTC
+today_start = datetime(now.year, now.month, now.day)
 tomorrow_end = today_start + timedelta(days=2)
 
 events_result = service.events().list(
     calendarId='primary',
-    timeMin=today_start.isoformat(),
-    timeMax=tomorrow_end.isoformat(),
+    timeMin=today_start.isoformat() + "Z",
+    timeMax=tomorrow_end.isoformat() + "Z",
     singleEvents=True,
     orderBy='startTime'
 ).execute()
@@ -129,21 +128,10 @@ event_texts = []
 for event in events:
     start = event['start'].get('dateTime', event['start'].get('date'))
     summary = event.get('summary', 'No Title')
-
-    try:
-        # Handle timezone-aware datetime conversion
-        if start:
-            start_dt = datetime.fromisoformat(start.replace("Z", "+00:00"))  # Offset-aware datetime
-            if today_start <= start_dt <= tomorrow_end:
-                st.write(f"• {start}: {summary}")
-                event_texts.append(f"{start}: {summary}")
-        else:
-            st.error(f"Event missing valid start time: {event}")
-
-    except ValueError as e:
-        st.error(f"Error parsing event start time: {e}. Event: {event}")
-    except Exception as e:
-        st.error(f"Unexpected error with event: {e}. Event: {event}")
+    start_dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
+    if today_start <= start_dt <= tomorrow_end:
+        st.write(f"• {start}: {summary}")
+        event_texts.append(f"{start}: {summary}")
 
 # Summarize events
 if event_texts:
@@ -176,3 +164,26 @@ else:
         full_news = " ".join(news_texts)
         news_summary = summarizer(full_news, max_length=60, min_length=25, do_sample=False)
         st.write(news_summary[0]['summary_text'])
+
+# Weather - Get city from user input
+st.subheader("🌤️ Weather Information")
+city = st.text_input("Enter city name:", "New York")  # Default to New York
+
+if city:
+    weather_url = f"http://api.weatherapi.com/v1/current.json?key={WEATHER_API_KEY}&q={city}&aqi=no"
+    weather_response = requests.get(weather_url)
+    weather_data = weather_response.json()
+
+    if 'error' not in weather_data:
+        temperature = weather_data['current']['temp_c']
+        condition = weather_data['current']['condition']['text']
+        humidity = weather_data['current']['humidity']
+        wind_speed = weather_data['current']['wind_kph']
+
+        st.write(f"Weather in {city}:")
+        st.write(f"Temperature: {temperature}°C")
+        st.write(f"Condition: {condition}")
+        st.write(f"Humidity: {humidity}%")
+        st.write(f"Wind Speed: {wind_speed} km/h")
+    else:
+        st.error(f"Error retrieving weather data for {city}.")
