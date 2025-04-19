@@ -25,7 +25,7 @@ NEWS_API_KEY = credentials_data.get('NEWS_API_KEY', '')
 WEATHER_API_KEY = credentials_data.get('WEATHER_API_KEY', '')
 
 # Initialize Streamlit
-st.title("🧠 AI Daily Assistant")
+st.title("🧠 AI Agentic Daily Assistant")
 st.write(f"🔁 Redirect URI: {redirect_uri}")
 
 # Authenticate user
@@ -155,11 +155,19 @@ class SummaryState(TypedDict):
 def create_langgraph_summary(event_texts, news_texts):
     # Define the summarize_event_node function here
     def summarize_event_node(state: SummaryState) -> dict:
-        return {"event_summary_output": summarize_texts(state.get("events", []))}
+        event_text = state.get("events", [])
+        if not event_text:
+            return {"event_summary_output": "No events to summarize."}
+        summary = summarize_texts(event_text)
+        return {"event_summary_output": summary}
 
     # Define the summarize_news_node function here
     def summarize_news_node(state: SummaryState) -> dict:
-        return {"news_summary_output": summarize_texts(state.get("news", []))}
+        news_text = state.get("news", [])
+        if not news_text:
+            return {"news_summary_output": "No news to summarize."}
+        summary = summarize_texts(news_text)
+        return {"news_summary_output": summary}
 
     builder = StateGraph(SummaryState)
     
