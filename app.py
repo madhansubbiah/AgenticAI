@@ -18,7 +18,7 @@ st.markdown("🔁 Redirect URI: https://my-agentic-ai.streamlit.app")
 query_params = st.query_params
 
 # Step 1: Google OAuth2 Authentication
-CLIENT_SECRET_FILE = 'client_secret.json'
+CLIENT_SECRET_FILE = 'credentials.json'
 SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
 CREDENTIALS_PICKLE = 'token.pkl'
 
