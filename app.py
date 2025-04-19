@@ -44,4 +44,4 @@ if 'code' in st.query_params and 'credentials' not in st.session_state:
     if os.path.exists('state_temp.json'):
         with open('state_temp.json', 'r') as f:
             stored_state = json.load(f).get('state')
-        os.remove('state_temp.json_
+        os.remove('state_temp.json')
