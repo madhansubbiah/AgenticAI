@@ -10,7 +10,7 @@ from googleapiclient.discovery import build
 from google.auth.transport.requests import Request
 from transformers import pipeline
 from typing import TypedDict, List
-from langgraph.graph import StateGraph, RunnableLambda
+from langgraph.graph import StateGraph
 
 # Set up environment
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
@@ -152,16 +152,20 @@ class SummaryState(TypedDict):
     event_summary: str
     news_summary: str
 
+# Function for summarizing event texts
+def summarize_event_node(state: SummaryState) -> dict:
+    return {"event_summary": summarize_texts(state.get("events", []))}
+
+# Function for summarizing news texts
+def summarize_news_node(state: SummaryState) -> dict:
+    return {"news_summary": summarize_texts(state.get("news", []))}
+
 def create_langgraph_summary(event_texts, news_texts):
-    def summarize_event_node(state: SummaryState) -> dict:
-        return {"event_summary": summarize_texts(state.get("events", []))}
-
-    def summarize_news_node(state: SummaryState) -> dict:
-        return {"news_summary": summarize_texts(state.get("news", []))}
-
     builder = StateGraph(SummaryState)
-    builder.add_node("event_summary", RunnableLambda(summarize_event_node))
-    builder.add_node("news_summary", RunnableLambda(summarize_news_node))
+    
+    # Add nodes with the functions instead of RunnableLambda
+    builder.add_node("event_summary", summarize_event_node)
+    builder.add_node("news_summary", summarize_news_node)
 
     builder.set_entry_point("event_summary")
     builder.add_edge("event_summary", "news_summary")
