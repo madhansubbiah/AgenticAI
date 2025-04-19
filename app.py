@@ -9,8 +9,7 @@ from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from google.auth.transport.requests import Request
 from transformers import pipeline
-from node_graph import NodeGraph, node  # Import NodeGraph and node
-from typing import List
+from typing import TypedDict, List
 
 # Set up environment
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
@@ -26,6 +25,7 @@ WEATHER_API_KEY = credentials_data.get('WEATHER_API_KEY', '')
 
 # Initialize Streamlit
 st.title("🧠 Agentic AI Daily Assistant")
+#st.write(f"🔁 Redirect URI: {redirect_uri}")
 
 # Authenticate user
 def authenticate_web():
@@ -64,6 +64,8 @@ if 'code' in st.query_params and 'credentials' not in st.session_state:
 
             with open('token.pickle', 'wb') as token:
                 pickle.dump(creds, token)
+
+            #st.success("✅ Successfully authenticated!")
         except Exception as e:
             st.error(f"Authentication failed: {e}")
     else:
@@ -135,41 +137,38 @@ for event in events:
     except Exception as e:
         st.warning(f"Unexpected error with event: {e}. Event: {event}")
 
-# Summarization function using NodeGraph
-def summarize_with_node_graph(texts: List[str]) -> str:
+# Summarization function
+def summarize_texts(texts):
     if not texts:
         return "No data to summarize."
-
-    # Create NodeGraph
-    graph = NodeGraph()
-
-    # Define a summarization node
-    @node
-    def summarizer(texts: List[str]) -> str:
-        if not texts:
-            return "No data to summarize."
-        
-        summarizer_pipeline = pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
-        combined_text = " ".join(texts)
-
-        if len(combined_text.split()) > 50:
-            summary = summarizer_pipeline(combined_text, max_length=80, min_length=40, do_sample=False)
-            return summary[0]['summary_text']
-        else:
-            return combined_text
-
-    # Add the summarizer node to the graph
-    graph.add_node(summarizer)
     
-    # Run the graph with the event texts
-    summary = graph.run(summarizer, event_texts)
-    return summary
+    summarizer = pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
+    combined_text = " ".join(texts)
 
-# Show NodeGraph summary of events
+    # Check if the text is long enough to summarize; else, just return the combined text
+    if len(combined_text.split()) > 50:
+        summary = summarizer(combined_text, max_length=80, min_length=40, do_sample=False)
+        return summary[0]['summary_text']
+    else:
+        return combined_text  # Return the original text if it's too short
+
+# LangGraph summarization using state
+def create_langgraph_summary(event_texts, news_texts):
+    # Generate summaries if there are texts available
+    event_summary = "No events to summarize." if not event_texts else summarize_texts(event_texts)
+    news_summary = "No news to summarize." if not news_texts else summarize_texts(news_texts)
+
+    # Return the summaries
+    return {
+        "event_summary_output": event_summary,
+        "news_summary_output": news_summary
+    }
+
+# Show LangGraph summary of events and news
 if event_texts:
     st.subheader("✨ Calendar Summary")
-    event_summary = summarize_with_node_graph(event_texts)
-    st.write(event_summary)
+    event_summary = create_langgraph_summary(event_texts, [])
+    st.write(event_summary.get("event_summary_output", "No summary available."))
 
 # Show top US news
 st.subheader("📰 Today's Top News")
@@ -190,8 +189,8 @@ else:
 # LangGraph workflow for news summary
 if news_texts:
     st.subheader("🧠 News Summary")
-    news_summary = summarize_with_node_graph(news_texts)
-    st.write(news_summary)
+    news_summary = create_langgraph_summary([], news_texts)
+    st.write(news_summary.get("news_summary_output", "No summary available."))
 
 # Weather input after calendar and news
 st.subheader("🌤️ Weather Forecast")
