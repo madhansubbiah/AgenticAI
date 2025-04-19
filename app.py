@@ -25,7 +25,7 @@ NEWS_API_KEY = credentials_data.get('NEWS_API_KEY', '')
 WEATHER_API_KEY = credentials_data.get('WEATHER_API_KEY', '')
 
 # Initialize Streamlit
-st.title("🧠 AI Agentic Daily Assistant")
+st.title("🧠 Agentic AI Daily Assistant")
 st.write(f"🔁 Redirect URI: {redirect_uri}")
 
 # Authenticate user
@@ -146,41 +146,31 @@ def summarize_texts(texts):
     return summarizer(" ".join(texts), max_length=60, min_length=25, do_sample=False)[0]['summary_text']
 
 # LangGraph summarization using state
-class SummaryState(TypedDict):
-    events: List[str]
-    news: List[str]
-    event_summary: str
-    news_summary: str
-
 def create_langgraph_summary(event_texts, news_texts):
-    # Define the summarize_event_node function here
-    def summarize_event_node(state: SummaryState) -> dict:
-        event_text = state.get("events", [])
-        if not event_text:
-            return {"event_summary_output": "No events to summarize."}
-        summary = summarize_texts(event_text)
-        return {"event_summary_output": summary}
+    # Simple debug: log event and news texts
+    st.write("Event texts:", event_texts)
+    st.write("News texts:", news_texts)
 
-    # Define the summarize_news_node function here
-    def summarize_news_node(state: SummaryState) -> dict:
-        news_text = state.get("news", [])
-        if not news_text:
-            return {"news_summary_output": "No news to summarize."}
-        summary = summarize_texts(news_text)
-        return {"news_summary_output": summary}
+    if not event_texts and not news_texts:
+        return {"event_summary_output": "No data to summarize."}
 
-    builder = StateGraph(SummaryState)
-    
-    # Ensure unique node names to avoid 'already used' errors
-    builder.add_node("event_summary_output", summarize_event_node)
-    builder.add_node("news_summary_output", summarize_news_node)
+    # Define summarizer for events and news separately
+    if event_texts:
+        event_summary = summarize_texts(event_texts)
+        st.write("Event summary:", event_summary)
+    else:
+        event_summary = "No events to summarize."
 
-    builder.set_entry_point("event_summary_output")
-    builder.add_edge("event_summary_output", "news_summary_output")
-    builder.set_finish_point("news_summary_output")
+    if news_texts:
+        news_summary = summarize_texts(news_texts)
+        st.write("News summary:", news_summary)
+    else:
+        news_summary = "No news to summarize."
 
-    app = builder.compile()
-    return app.invoke({"events": event_texts, "news": news_texts})
+    return {
+        "event_summary_output": event_summary,
+        "news_summary_output": news_summary
+    }
 
 # Show LangGraph summary of events and news
 if event_texts:
