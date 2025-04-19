@@ -1,96 +1,104 @@
-import os
-import json
-import pickle
-import requests
-import streamlit as st
-from datetime import datetime, timedelta
-from urllib.parse import urlencode
-from google_auth_oauthlib.flow import Flow
-from googleapiclient.discovery import build
-from google.auth.transport.requests import Request
-from transformers import pipeline
-from typing import TypedDict, List
+# Import necessary libraries
+import os  # Provides functions to interact with the operating system (e.g., file handling)
+import json  # Allows parsing and working with JSON data
+import pickle  # Used for serializing and deserializing Python objects (e.g., saving credentials)
+import requests  # For making HTTP requests, e.g., fetching data from APIs
+import streamlit as st  # Streamlit library to create the web application interface
+from datetime import datetime, timedelta  # To handle date and time-related operations
+from urllib.parse import urlencode  # To encode URL query parameters (used in OAuth flow)
+from google_auth_oauthlib.flow import Flow  # For handling OAuth 2.0 authentication with Google
+from googleapiclient.discovery import build  # To interact with Google's APIs (e.g., Google Calendar)
+from google.auth.transport.requests import Request  # For refreshing expired credentials
+from transformers import pipeline  # Hugging Face's pipeline API for NLP tasks like summarization
+from typing import TypedDict, List  # For type hinting (specifying types for function arguments and return values)
 
-# Set up environment
-os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
+# Set up environment to allow OAuth to work over an insecure transport (HTTP instead of HTTPS)
+#os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'  # Allows OAuth to work with HTTP (instead of HTTPS)
 
-# Load credentials
-with open('credentials.json') as f:
-    credentials_data = json.load(f)
+# Load credentials from a JSON file for Google OAuth and other APIs
+with open('credentials.json') as f:  # Open the credentials JSON file
+    credentials_data = json.load(f)  # Load the credentials data from the file
 
-redirect_uri = credentials_data['web']['redirect_uris'][0]
-SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
-NEWS_API_KEY = credentials_data.get('NEWS_API_KEY', '')
-WEATHER_API_KEY = credentials_data.get('WEATHER_API_KEY', '')
+redirect_uri = credentials_data['web']['redirect_uris'][0]  # Extract redirect URI from the credentials file
+SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']  # Google Calendar API access scope (read-only)
+NEWS_API_KEY = credentials_data.get('NEWS_API_KEY', '')  # News API key for fetching news
+WEATHER_API_KEY = credentials_data.get('WEATHER_API_KEY', '')  # Weather API key for fetching weather data
 
-# Initialize Streamlit
-st.title("🧠 Agentic AI Daily Assistant")
-#st.write(f"🔁 Redirect URI: {redirect_uri}")
+# Initialize the Streamlit app with a title
+st.title("🧠 Agentic AI Daily Assistant")  # Set the title of the web app
 
-# Authenticate user
+# Authentication function to initiate Google OAuth
 def authenticate_web():
+    # Create OAuth flow for Google authentication using credentials file and requested scopes
     flow = Flow.from_client_secrets_file(
-        'credentials.json',
-        scopes=SCOPES,
-        redirect_uri=redirect_uri
+        'credentials.json',  # Use the credentials file for OAuth
+        scopes=SCOPES,  # Define the scopes (permissions) for accessing Google Calendar
+        redirect_uri=redirect_uri  # Set the redirect URI to redirect the user after authentication
     )
+    # Generate the authorization URL where the user will log in and authorize access
     authorization_url, state = flow.authorization_url(access_type='offline', include_granted_scopes='true')
-    return authorization_url, flow, state
+    return authorization_url, flow, state  # Return the URL and state for OAuth flow
 
-# Handle OAuth callback
+# Handle OAuth callback after user authorizes access
 if 'code' in st.query_params and 'credentials' not in st.session_state:
-    received_state = st.query_params.get('state')
+    received_state = st.query_params.get('state')  # Get the 'state' parameter from the callback URL
+    
+    # Check if the state matches the one we stored to prevent CSRF attacks
     if os.path.exists('state_temp.json'):
         with open('state_temp.json', 'r') as f:
             stored_state = json.load(f).get('state')
-        os.remove('state_temp.json')
+        os.remove('state_temp.json')  # Delete temporary state file after usage
     else:
         stored_state = None
 
-    if stored_state == received_state:
+    if stored_state == received_state:  # Proceed only if the state matches
         flow = Flow.from_client_secrets_file(
-            'credentials.json',
-            scopes=SCOPES,
-            redirect_uri=redirect_uri
+            'credentials.json',  # Reload the OAuth flow using the credentials file
+            scopes=SCOPES,  # Define the requested scopes (Google Calendar access)
+            redirect_uri=redirect_uri  # Use the same redirect URI as before
         )
-        query_dict = st.query_params
-        query_string = urlencode(query_dict, doseq=True)
-        authorization_response = f"{redirect_uri}?{query_string}"
+        query_dict = st.query_params  # Extract query parameters from the callback URL
+        query_string = urlencode(query_dict, doseq=True)  # URL encode the query parameters
+        authorization_response = f"{redirect_uri}?{query_string}"  # Build the full authorization response URL
 
         try:
-            flow.fetch_token(authorization_response=authorization_response)
-            creds = flow.credentials
-            st.session_state.credentials = creds
+            flow.fetch_token(authorization_response=authorization_response)  # Get the access token using the response
+            creds = flow.credentials  # Retrieve the credentials object
+            st.session_state.credentials = creds  # Store the credentials in the session state
 
+            # Save the credentials for future use (so the user doesn't need to re-authenticate)
             with open('token.pickle', 'wb') as token:
                 pickle.dump(creds, token)
-
-            #st.success("✅ Successfully authenticated!")
         except Exception as e:
-            st.error(f"Authentication failed: {e}")
+            st.error(f"Authentication failed: {e}")  # Display an error if authentication fails
     else:
-        st.error("State mismatch! Possible CSRF attack.")
+        st.error("State mismatch! Possible CSRF attack.")  # Warn about state mismatch (possible CSRF)
 
-# Load saved credentials
+# Load saved credentials if they already exist
 if 'credentials' not in st.session_state:
-    if os.path.exists('token.pickle'):
+    if os.path.exists('token.pickle'):  # Check if there is a saved token file
         with open('token.pickle', 'rb') as token:
-            creds = pickle.load(token)
+            creds = pickle.load(token)  # Load the credentials from the saved token file
 
+        # If credentials are valid, store them in the session state
         if creds and creds.valid:
             st.session_state.credentials = creds
+        # If credentials have expired, refresh them using the refresh token (if available)
         elif creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-            st.session_state.credentials = creds
+            creds.refresh(Request())  # Refresh the expired credentials
+            st.session_state.credentials = creds  # Store the refreshed credentials
+            # Save the refreshed credentials for future use
             with open('token.pickle', 'wb') as token:
                 pickle.dump(creds, token)
 
-# Prompt login
+# Prompt user to login if credentials are not available
 if 'credentials' not in st.session_state:
-    authorization_url, flow, state = authenticate_web()
+    authorization_url, flow, state = authenticate_web()  # Start the OAuth process
+    # Store the state temporarily to protect against CSRF attacks
     with open('state_temp.json', 'w') as f:
         json.dump({'state': state}, f)
 
+    # Display a button to allow the user to authorize access to Google Calendar
     st.markdown(
         f"""
         <div style="text-align:center;">
@@ -103,120 +111,38 @@ if 'credentials' not in st.session_state:
         """,
         unsafe_allow_html=True
     )
-    st.info("Please authorize access to your Google Calendar.")
-    st.stop()
+    st.info("Please authorize access to your Google Calendar.")  # Inform the user to authorize
+    st.stop()  # Stop execution until user authorizes
 
-# Fetch calendar events
+# Fetch and display user's calendar events for today and tomorrow
 creds = st.session_state.credentials
-service = build('calendar', 'v3', credentials=creds)
+service = build('calendar', 'v3', credentials=creds)  # Build the Google Calendar API service
 
-now = datetime.utcnow()
-today_start = datetime(now.year, now.month, now.day, tzinfo=datetime.now().astimezone().tzinfo)
-tomorrow_end = today_start + timedelta(days=2)
+now = datetime.utcnow()  # Get the current UTC time
+today_start = datetime(now.year, now.month, now.day, tzinfo=datetime.now().astimezone().tzinfo)  # Start of today
+tomorrow_end = today_start + timedelta(days=2)  # End of tomorrow
 
+# Fetch events from Google Calendar between today and tomorrow
 events_result = service.events().list(
-    calendarId='primary',
-    timeMin=today_start.isoformat(),
-    timeMax=tomorrow_end.isoformat(),
-    singleEvents=True,
-    orderBy='startTime'
+    calendarId='primary',  # Use the primary calendar
+    timeMin=today_start.isoformat(),  # Set the start time filter (today)
+    timeMax=tomorrow_end.isoformat(),  # Set the end time filter (tomorrow)
+    singleEvents=True,  # Ensure recurring events are listed individually
+    orderBy='startTime'  # Order the events by start time
 ).execute()
 
-events = events_result.get('items', [])
+events = events_result.get('items', [])  # Get the events from the API response
 
+# Display the events on the web app
 st.subheader("📅 Today's & Tomorrow's Events")
-event_texts = []
+event_texts = []  # List to store event descriptions for summarization
 for event in events:
     try:
-        start = event['start'].get('dateTime', event['start'].get('date'))
-        summary = event.get('summary', 'No Title')
-        start_dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
-        if today_start <= start_dt <= tomorrow_end:
-            st.write(f"• {start_dt.strftime('%Y-%m-%d %H:%M')} — {summary}")
-            event_texts.append(f"{start_dt.strftime('%Y-%m-%d %H:%M')} — {summary}")
+        start = event['start'].get('dateTime', event['start'].get('date'))  # Extract start time of the event
+        summary = event.get('summary', 'No Title')  # Extract event summary (title)
+        start_dt = datetime.fromisoformat(start.replace("Z", "+00:00"))  # Convert start time to datetime object
+        if today_start <= start_dt <= tomorrow_end:  # Check if event is within the time range
+            st.write(f"• {start_dt.strftime('%Y-%m-%d %H:%M')} — {summary}")  # Display event details
+            event_texts.append(f"{start_dt.strftime('%Y-%m-%d %H:%M')} — {summary}")  # Add to event texts for summarization
     except Exception as e:
-        st.warning(f"Unexpected error with event: {e}. Event: {event}")
-
-# Summarization function
-def summarize_texts(texts):
-    if not texts:
-        return "No data to summarize."
-    
-    summarizer = pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
-    combined_text = " ".join(texts)
-
-    # Check if the text is long enough to summarize; else, just return the combined text
-    if len(combined_text.split()) > 50:
-        summary = summarizer(combined_text, max_length=80, min_length=40, do_sample=False)
-        return summary[0]['summary_text']
-    else:
-        return combined_text  # Return the original text if it's too short
-
-# LangGraph summarization using state
-def create_langgraph_summary(event_texts, news_texts):
-    # Generate summaries if there are texts available
-    event_summary = "No events to summarize." if not event_texts else summarize_texts(event_texts)
-    news_summary = "No news to summarize." if not news_texts else summarize_texts(news_texts)
-
-    # Return the summaries
-    return {
-        "event_summary_output": event_summary,
-        "news_summary_output": news_summary
-    }
-
-# Show LangGraph summary of events and news
-if event_texts:
-    st.subheader("✨ Calendar Summary")
-    event_summary = create_langgraph_summary(event_texts, [])
-    st.write(event_summary.get("event_summary_output", "No summary available."))
-
-# Show top US news
-st.subheader("📰 Today's Top News")
-news_url = f"https://newsapi.org/v2/top-headlines?country=us&apiKey={NEWS_API_KEY}"
-response = requests.get(news_url)
-news_data = response.json()
-
-articles = news_data.get('articles', [])[:5]
-news_texts = []
-
-if not articles:
-    st.warning("No news articles found.")
-else:
-    for article in articles:
-        st.markdown(f"**• {article['title']}**")
-        news_texts.append(article['title'] + ". " + (article.get('description') or ''))
-
-# LangGraph workflow for news summary
-if news_texts:
-    st.subheader("🧠 News Summary")
-    news_summary = create_langgraph_summary([], news_texts)
-    st.write(news_summary.get("news_summary_output", "No summary available."))
-
-# Weather input after calendar and news
-st.subheader("🌤️ Weather Forecast")
-cities = [
-    "New York", "Los Angeles", "Chicago", "Houston", "Phoenix", "Philadelphia", "San Antonio", "San Diego", "Dallas", "San Jose",
-    "Austin", "Jacksonville", "Fort Worth", "Columbus", "Indianapolis", "Charlotte", "San Francisco", "Seattle", "Denver", "Washington D.C.",
-    "Boston", "El Paso", "Detroit", "Nashville", "Portland", "Memphis", "Oklahoma City", "Las Vegas", "Louisville", "Baltimore",
-    "Milwaukee", "Albuquerque", "Tucson", "Fresno", "Mesa", "Sacramento", "Kansas City", "Long Beach", "Atlanta", "Raleigh",
-    "Miami", "Omaha", "Cleveland", "Tulsa", "Minneapolis", "Arlington", "New Orleans", "Wichita", "Bakersfield", "Cincinnati"
-]
-selected_city = st.selectbox("Select a city to see the current weather:", cities)
-
-if selected_city:
-    weather_url = f"http://api.weatherapi.com/v1/current.json?key={WEATHER_API_KEY}&q={selected_city}"
-    weather_response = requests.get(weather_url)
-
-    if weather_response.status_code == 200:
-        weather_data = weather_response.json()
-        condition = weather_data['current']['condition']['text']
-        temp_c = weather_data['current']['temp_c']
-        feels_like = weather_data['current']['feelslike_c']
-        humidity = weather_data['current']['humidity']
-
-        st.markdown(f"**City:** {selected_city}")
-        st.markdown(f"**Condition:** {condition}")
-        st.markdown(f"**Temperature:** {temp_c}°C (Feels like {feels_like}°C)")
-        st.markdown(f"**Humidity:** {humidity}%")
-    else:
-        st.error(f"Could not retrieve weather data for {selected_city}")
+        st.warning(f"Unexpected error with event: {e}. Event: {event}")  # Display warning if an error occurs with an event
