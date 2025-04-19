@@ -10,7 +10,7 @@ from googleapiclient.discovery import build
 from google.auth.transport.requests import Request
 from transformers import pipeline
 from typing import TypedDict, List
-from langgraph.graph import StateGraph, RunnableLambda
+from langgraph.graph import StateGraph
 
 # Set up environment
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
@@ -155,13 +155,13 @@ class SummaryState(TypedDict):
 def create_langgraph_summary(event_texts, news_texts):
     builder = StateGraph(SummaryState)
     
-    # Add nodes with unique keys for event and news summary
-    builder.add_node("event_summary_unique", summarize_event_node)
-    builder.add_node("news_summary_unique", summarize_news_node)
+    # Define nodes for event summary and news summary
+    builder.add_node("event_summary", summarize_event_node)
+    builder.add_node("news_summary", summarize_news_node)
 
-    builder.set_entry_point("event_summary_unique")
-    builder.add_edge("event_summary_unique", "news_summary_unique")
-    builder.set_finish_point("news_summary_unique")
+    builder.set_entry_point("event_summary")
+    builder.add_edge("event_summary", "news_summary")
+    builder.set_finish_point("news_summary")
 
     app = builder.compile()
     return app.invoke({"events": event_texts, "news": news_texts})
@@ -170,7 +170,7 @@ def create_langgraph_summary(event_texts, news_texts):
 if event_texts:
     st.subheader("✨ Calendar Summary")
     event_summary = create_langgraph_summary(event_texts, [])
-    st.write(event_summary.get("event_summary_unique", "No summary available."))
+    st.write(event_summary.get("event_summary", "No summary available."))
 
 # Show top US news
 st.subheader("📰 Today's Top News")
@@ -192,7 +192,7 @@ else:
 if news_texts:
     st.subheader("🧠 News Summary")
     news_summary = create_langgraph_summary([], news_texts)
-    st.write(news_summary.get("news_summary_unique", "No summary available."))
+    st.write(news_summary.get("news_summary", "No summary available."))
 
 # Weather input after calendar and news
 st.subheader("🌤️ Weather Forecast")
