@@ -10,7 +10,6 @@ from googleapiclient.discovery import build
 from google.auth.transport.requests import Request
 from transformers import pipeline
 from typing import TypedDict, List
-from langgraph.graph import StateGraph
 
 # Set up environment
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
@@ -142,31 +141,24 @@ for event in events:
 def summarize_texts(texts):
     if not texts:
         return "No data to summarize."
+    
     summarizer = pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
-    return summarizer(" ".join(texts), max_length=60, min_length=25, do_sample=False)[0]['summary_text']
+    combined_text = " ".join(texts)
+
+    # Check if the text is long enough to summarize; else, just return the combined text
+    if len(combined_text.split()) > 50:
+        summary = summarizer(combined_text, max_length=80, min_length=40, do_sample=False)
+        return summary[0]['summary_text']
+    else:
+        return combined_text  # Return the original text if it's too short
 
 # LangGraph summarization using state
 def create_langgraph_summary(event_texts, news_texts):
-    # Simple debug: log event and news texts
-    st.write("Event texts:", event_texts)
-    st.write("News texts:", news_texts)
+    # Generate summaries if there are texts available
+    event_summary = "No events to summarize." if not event_texts else summarize_texts(event_texts)
+    news_summary = "No news to summarize." if not news_texts else summarize_texts(news_texts)
 
-    if not event_texts and not news_texts:
-        return {"event_summary_output": "No data to summarize."}
-
-    # Define summarizer for events and news separately
-    if event_texts:
-        event_summary = summarize_texts(event_texts)
-        st.write("Event summary:", event_summary)
-    else:
-        event_summary = "No events to summarize."
-
-    if news_texts:
-        news_summary = summarize_texts(news_texts)
-        st.write("News summary:", news_summary)
-    else:
-        news_summary = "No news to summarize."
-
+    # Return the summaries
     return {
         "event_summary_output": event_summary,
         "news_summary_output": news_summary
@@ -227,4 +219,4 @@ if selected_city:
         st.markdown(f"**Temperature:** {temp_c}°C (Feels like {feels_like}°C)")
         st.markdown(f"**Humidity:** {humidity}%")
     else:
-        st.error(f"Could not fetch weather data for {selected_city}. Please try again.")
+        st.error(f"Could not retrieve weather data for {selected_city}")
