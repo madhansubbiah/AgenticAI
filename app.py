@@ -153,9 +153,15 @@ class SummaryState(TypedDict):
     news_summary: str
 
 def create_langgraph_summary(event_texts, news_texts):
+    # Define the summarize_event_node function here
+    def summarize_event_node(state: SummaryState) -> dict:
+        return {"event_summary": summarize_texts(state.get("events", []))}
+
+    # Define the summarize_news_node function here
+    def summarize_news_node(state: SummaryState) -> dict:
+        return {"news_summary": summarize_texts(state.get("news", []))}
+
     builder = StateGraph(SummaryState)
-    
-    # Define nodes for event summary and news summary
     builder.add_node("event_summary", summarize_event_node)
     builder.add_node("news_summary", summarize_news_node)
 
