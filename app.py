@@ -8,9 +8,9 @@ from urllib.parse import urlencode
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from google.auth.transport.requests import Request
-from langgraph.graph import Graph, Node, State
-from langgraph.graph.nodes import SummarizeNode
-from typing import TypedDict, List
+from langgraph import Graph
+from langgraph.nodes import Summarizer
+from typing import List
 
 # Set up environment
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
@@ -137,23 +137,15 @@ for event in events:
 
 # LangGraph Summarization
 def create_langgraph_summary(event_texts, news_texts):
-    # Initialize LangGraph
+    # Create a LangGraph instance
     graph = Graph()
 
-    # Add summarization nodes for events and news
-    event_node = Node(SummarizeNode(), input_data=event_texts)
-    news_node = Node(SummarizeNode(), input_data=news_texts)
+    # Initialize the Summarizer node
+    summarizer = Summarizer()
 
-    # Add nodes to graph
-    graph.add_node("event_summary", event_node)
-    graph.add_node("news_summary", news_node)
-
-    # Create state
-    state = State(graph)
-    
-    # Retrieve outputs
-    event_summary = state.get_node("event_summary").run()
-    news_summary = state.get_node("news_summary").run()
+    # Add summarizer for events and news
+    event_summary = summarizer.summarize(event_texts)
+    news_summary = summarizer.summarize(news_texts)
 
     return {
         "event_summary_output": event_summary or "No events to summarize.",
