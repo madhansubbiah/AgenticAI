@@ -9,8 +9,8 @@ from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from google.auth.transport.requests import Request
 from transformers import pipeline
-from langgraph.graph import StateGraph
-from langchain_core.runnables import RunnableLambda
+from typing import TypedDict, List
+from langgraph.graph import StateGraph, RunnableLambda
 
 # Set up environment
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
@@ -145,33 +145,36 @@ def summarize_texts(texts):
     summarizer = pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
     return summarizer(" ".join(texts), max_length=60, min_length=25, do_sample=False)[0]['summary_text']
 
-# LangGraph summarization workflow
+# LangGraph summarization using state
+class SummaryState(TypedDict):
+    events: List[str]
+    news: List[str]
+    event_summary: str
+    news_summary: str
+
 def create_langgraph_summary(event_texts, news_texts):
-    def summarize_event_node(state):
+    def summarize_event_node(state: SummaryState) -> dict:
         return {"event_summary": summarize_texts(state.get("events", []))}
 
-    def summarize_news_node(state):
+    def summarize_news_node(state: SummaryState) -> dict:
         return {"news_summary": summarize_texts(state.get("news", []))}
 
-    graph = StateGraph()
-    graph.add_node("event_summary", RunnableLambda(summarize_event_node))
-    graph.add_node("news_summary", RunnableLambda(summarize_news_node))
+    builder = StateGraph(SummaryState)
+    builder.add_node("event_summary", RunnableLambda(summarize_event_node))
+    builder.add_node("news_summary", RunnableLambda(summarize_news_node))
 
-    graph.set_entry_point("event_summary")
-    graph.set_finish_point("news_summary")
+    builder.set_entry_point("event_summary")
+    builder.add_edge("event_summary", "news_summary")
+    builder.set_finish_point("news_summary")
 
-    graph = graph.compile(
-        input={"events": list, "news": list},
-        output={"event_summary": str, "news_summary": str}
-    )
+    app = builder.compile()
+    return app.invoke({"events": event_texts, "news": news_texts})
 
-    return graph.invoke({"events": event_texts, "news": news_texts})
-
-# Show LangGraph summary of events
+# Show LangGraph summary of events and news
 if event_texts:
     st.subheader("✨ Calendar Summary")
     event_summary = create_langgraph_summary(event_texts, [])
-    st.write(event_summary["event_summary"])
+    st.write(event_summary.get("event_summary", "No summary available."))
 
 # Show top US news
 st.subheader("📰 Today's Top News")
@@ -193,7 +196,7 @@ else:
 if news_texts:
     st.subheader("🧠 News Summary")
     news_summary = create_langgraph_summary([], news_texts)
-    st.write(news_summary["news_summary"])
+    st.write(news_summary.get("news_summary", "No summary available."))
 
 # Weather input after calendar and news
 st.subheader("🌤️ Weather Forecast")
