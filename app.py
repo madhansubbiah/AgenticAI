@@ -1,153 +1,119 @@
 import streamlit as st
-import json
-import requests
+from google_auth_oauthlib.flow import Flow
+from googleapiclient.discovery import build
 from datetime import datetime, timedelta
 import pytz
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
-from langgraph.graph import StateGraph
+import json
+import requests
+from langchain_core.runnables import RunnableLambda
+from langgraph.graph import StateGraph, END
+from langchain_core.runnables import RunnableConfig
 
-# Load credentials
+# ---- Load credentials ----
 with open("credentials.json") as f:
-    creds_data = json.load(f)
+    secrets = json.load(f)
 
-google_creds = service_account.Credentials.from_service_account_info(
-    creds_data,
-    scopes=["https://www.googleapis.com/auth/calendar.readonly"]
-)
+client_config = {
+    "web": secrets["web"]
+}
+NEWS_API_KEY = secrets["NEWS_API_KEY"]
+WEATHER_API_KEY = secrets["WEATHER_API_KEY"]
 
-weather_api_key = creds_data.get("weather_api_key")
-news_api_key = creds_data.get("news_api_key")
-
-# --- UI ---
-st.title("🧠 AI Smart Daily Dashboard")
+# ---- City Selection (Dropdown - UI) ----
 cities = ["New York", "San Francisco", "Chicago", "Houston", "Miami", "Los Angeles", "Seattle", "Dallas", "Boston", "Denver"]
-city = st.selectbox("Choose your city to get the weather report:", cities)
+selected_city = st.selectbox("Choose your city for weather info:", cities)
 
-# --- STATE MANAGEMENT FOR LANGGRAPH ---
-class AppState(dict):
-    pass
+# ---- Google Auth ----
+if "credentials" not in st.session_state:
+    flow = Flow.from_client_config(
+        client_config=client_config,
+        scopes=["https://www.googleapis.com/auth/calendar.readonly"],
+        redirect_uri="https://my-agentic-ai.streamlit.app"
+    )
 
-# --- NODES ---
-def fetch_events(state):
-    try:
-        service = build("calendar", "v3", credentials=google_creds)
-        now = datetime.utcnow().isoformat() + 'Z'
-        tomorrow = (datetime.utcnow() + timedelta(days=2)).isoformat() + 'Z'
+    auth_url, _ = flow.authorization_url(prompt="consent")
+    st.write("### 🔐 Please authorize access to your Google Calendar:")
+    st.markdown(f"[Authorize]({auth_url})")
+    st.stop()
 
-        events_result = service.events().list(
-            calendarId='primary',
-            timeMin=now,
-            timeMax=tomorrow,
-            maxResults=10,
-            singleEvents=True,
-            orderBy='startTime'
-        ).execute()
+# ---- Events Display Logic ----
+def fetch_calendar_events(credentials):
+    service = build("calendar", "v3", credentials=credentials)
 
-        events = events_result.get('items', [])
+    now = datetime.utcnow().isoformat() + "Z"
+    tomorrow = (datetime.utcnow() + timedelta(days=1)).isoformat() + "Z"
 
-        today = datetime.utcnow().date()
-        tomorrow_date = today + timedelta(days=1)
-
-        today_events = []
-        tomorrow_events = []
-
+    events_result = service.events().list(
+        calendarId='primary', timeMin=now, timeMax=tomorrow,
+        singleEvents=True, orderBy='startTime').execute()
+    
+    events = events_result.get('items', [])
+    event_text = "📅 **Today's & Tomorrow's Events**\n"
+    if not events:
+        event_text += "No upcoming events found."
+    else:
         for event in events:
             start = event['start'].get('dateTime', event['start'].get('date'))
-            try:
-                start_dt = datetime.fromisoformat(start)
-            except:
-                start_dt = datetime.strptime(start, "%Y-%m-%d")
+            start_dt = datetime.fromisoformat(start.replace('Z', '+00:00'))
+            local_start = start_dt.astimezone(pytz.timezone("America/New_York"))
+            summary = event.get("summary", "No Title")
+            event_text += f"- {local_start.strftime('%Y-%m-%d %I:%M %p')}: {summary}\n"
+    return event_text
 
-            if start_dt.date() == today:
-                today_events.append(event['summary'])
-            elif start_dt.date() == tomorrow_date:
-                tomorrow_events.append(event['summary'])
+# ---- News Logic ----
+def fetch_top_news():
+    url = f"https://newsapi.org/v2/top-headlines?country=us&apiKey={NEWS_API_KEY}"
+    response = requests.get(url)
+    if response.status_code == 200:
+        news_data = response.json()
+        articles = news_data["articles"][:5]
+        news_text = "📰 **Today's Top News**\n"
+        for article in articles:
+            news_text += f"- {article['title']} - {article['source']['name']}\n"
+        return news_text
+    return "Failed to fetch news."
 
-        state["today_events"] = today_events
-        state["tomorrow_events"] = tomorrow_events
-    except Exception as e:
-        state["calendar_error"] = str(e)
-
-    return state
-
-def fetch_news(state):
-    try:
-        url = f"https://newsapi.org/v2/top-headlines?country=us&apiKey={news_api_key}"
-        response = requests.get(url)
+# ---- Weather Logic ----
+def fetch_weather(city):
+    url = f"http://api.weatherapi.com/v1/current.json?key={WEATHER_API_KEY}&q={city}"
+    response = requests.get(url)
+    if response.status_code == 200:
         data = response.json()
-
-        articles = data.get("articles", [])[:5]
-        news_titles = [f"• {article['title']} - {article['source']['name']}" for article in articles]
-        state["news"] = news_titles
-    except Exception as e:
-        state["news_error"] = str(e)
-
-    return state
-
-def fetch_weather(state):
-    city = state.get("city")
-    try:
-        url = f"http://api.weatherapi.com/v1/current.json?key={weather_api_key}&q={city}"
-        response = requests.get(url)
-        data = response.json()
-
-        condition = data["current"]["condition"]["text"]
-        temp_c = data["current"]["temp_c"]
-        feelslike_c = data["current"]["feelslike_c"]
-
-        state["weather"] = f"{condition}, {temp_c}°C (Feels like {feelslike_c}°C)"
-    except:
-        state["weather"] = f"Could not fetch weather data for {city}. Please try again."
-
-    return state
-
-def display_results(state):
-    st.subheader("📅 Today's & Tomorrow's Events")
-    if state.get("calendar_error"):
-        st.error("Calendar error: " + state["calendar_error"])
+        temp_c = data['current']['temp_c']
+        condition = data['current']['condition']['text']
+        return f"🌤️ **Weather in {city}:** {temp_c}°C, {condition}"
     else:
-        st.write("**Today:**")
-        if state.get("today_events"):
-            for ev in state["today_events"]:
-                st.write(f"- {ev}")
-        else:
-            st.write("No events for today.")
+        return f"Could not fetch weather data for {city}. Please try again."
 
-        st.write("**Tomorrow:**")
-        if state.get("tomorrow_events"):
-            for ev in state["tomorrow_events"]:
-                st.write(f"- {ev}")
-        else:
-            st.write("No events for tomorrow.")
+# ---- LangGraph Integration ----
+def create_graph():
+    def calendar_node(state):
+        return {"calendar": fetch_calendar_events(st.session_state.credentials)}
 
-    st.subheader("📰 Today's Top News")
-    if state.get("news_error"):
-        st.error("News error: " + state["news_error"])
-    else:
-        for headline in state.get("news", []):
-            st.write(headline)
+    def news_node(state):
+        return {"news": fetch_top_news()}
 
-    st.subheader(f"☀️ Weather in {state['city']}")
-    st.write(state.get("weather", "No weather data available."))
+    def weather_node(state):
+        return {"weather": fetch_weather(selected_city)}
 
-    return state
+    builder = StateGraph()
+    builder.add_node("calendar", RunnableLambda(calendar_node))
+    builder.add_node("news", RunnableLambda(news_node))
+    builder.add_node("weather", RunnableLambda(weather_node))
 
-# --- BUILD LANGGRAPH ---
-graph = StateGraph(AppState)
-graph.add_node("fetch_events", fetch_events)
-graph.add_node("fetch_news", fetch_news)
-graph.add_node("fetch_weather", fetch_weather)
-graph.add_node("display_results", display_results)
+    builder.set_entry_point("calendar")
+    builder.add_edge("calendar", "news")
+    builder.add_edge("news", "weather")
+    builder.add_edge("weather", END)
 
-# Order of flow
-graph.set_entry_point("fetch_events")
-graph.add_edge("fetch_events", "fetch_news")
-graph.add_edge("fetch_news", "fetch_weather")
-graph.add_edge("fetch_weather", "display_results")
+    graph = builder.compile()
+    return graph
 
-app = graph.compile()
+# ---- Run LangGraph ----
+graph = create_graph()
+result = graph.invoke({}, config=RunnableConfig())
 
-# --- Run Graph ---
-initial_state = AppState({"city": city})
-app.invoke(initial_state)
+# ---- Display in order ----
+st.markdown(result["calendar"])
+st.markdown(result["news"])
+st.markdown(result["weather"])
