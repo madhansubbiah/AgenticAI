@@ -10,3 +10,4 @@ torch
 langgraph 
 openai 
 huggingface_hub
+node-graph

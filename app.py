@@ -9,8 +9,8 @@ from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from google.auth.transport.requests import Request
 from transformers import pipeline
-from langgraph import Graph, Node  # Import Graph and Node from langgraph
-from typing import TypedDict, List
+from node_graph import NodeGraph, node  # Import NodeGraph and node
+from typing import List
 
 # Set up environment
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
@@ -135,58 +135,41 @@ for event in events:
     except Exception as e:
         st.warning(f"Unexpected error with event: {e}. Event: {event}")
 
-# Summarization function using LangGraph
-def summarize_with_langgraph(texts: List[str]) -> str:
+# Summarization function using NodeGraph
+def summarize_with_node_graph(texts: List[str]) -> str:
     if not texts:
         return "No data to summarize."
 
-    # Create LangGraph graph
-    graph = Graph()
+    # Create NodeGraph
+    graph = NodeGraph()
 
-    # Adding a node to the graph for summarizing
-    node = Node(label="Summarizer")
-    graph.add_node(node)
+    # Define a summarization node
+    @node
+    def summarizer(texts: List[str]) -> str:
+        if not texts:
+            return "No data to summarize."
+        
+        summarizer_pipeline = pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
+        combined_text = " ".join(texts)
 
-    # This node should process the combined text to summarize it
-    combined_text = " ".join(texts)
-    node.set_function(lambda x: summarize_texts([combined_text]))  # Use a simple function for summarizing
+        if len(combined_text.split()) > 50:
+            summary = summarizer_pipeline(combined_text, max_length=80, min_length=40, do_sample=False)
+            return summary[0]['summary_text']
+        else:
+            return combined_text
+
+    # Add the summarizer node to the graph
+    graph.add_node(summarizer)
     
-    # Get the result
-    summary = graph.run()
+    # Run the graph with the event texts
+    summary = graph.run(summarizer, event_texts)
     return summary
 
-# Summarization function
-def summarize_texts(texts: List[str]) -> str:
-    if not texts:
-        return "No data to summarize."
-    
-    summarizer = pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
-    combined_text = " ".join(texts)
-
-    # Check if the text is long enough to summarize; else, just return the combined text
-    if len(combined_text.split()) > 50:
-        summary = summarizer(combined_text, max_length=80, min_length=40, do_sample=False)
-        return summary[0]['summary_text']
-    else:
-        return combined_text  # Return the original text if it's too short
-
-# LangGraph summarization using state
-def create_langgraph_summary(event_texts, news_texts):
-    # Generate summaries if there are texts available
-    event_summary = "No events to summarize." if not event_texts else summarize_with_langgraph(event_texts)
-    news_summary = "No news to summarize." if not news_texts else summarize_with_langgraph(news_texts)
-
-    # Return the summaries
-    return {
-        "event_summary_output": event_summary,
-        "news_summary_output": news_summary
-    }
-
-# Show LangGraph summary of events and news
+# Show NodeGraph summary of events
 if event_texts:
     st.subheader("✨ Calendar Summary")
-    event_summary = create_langgraph_summary(event_texts, [])
-    st.write(event_summary.get("event_summary_output", "No summary available."))
+    event_summary = summarize_with_node_graph(event_texts)
+    st.write(event_summary)
 
 # Show top US news
 st.subheader("📰 Today's Top News")
@@ -207,8 +190,8 @@ else:
 # LangGraph workflow for news summary
 if news_texts:
     st.subheader("🧠 News Summary")
-    news_summary = create_langgraph_summary([], news_texts)
-    st.write(news_summary.get("news_summary_output", "No summary available."))
+    news_summary = summarize_with_node_graph(news_texts)
+    st.write(news_summary)
 
 # Weather input after calendar and news
 st.subheader("🌤️ Weather Forecast")
