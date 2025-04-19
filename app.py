@@ -9,6 +9,7 @@ from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from google.auth.transport.requests import Request
 from transformers import pipeline
+import pytz
 
 # Environment setup
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
@@ -110,13 +111,13 @@ creds = st.session_state.credentials
 service = build('calendar', 'v3', credentials=creds)
 
 now = datetime.utcnow()
-today_start = datetime(now.year, now.month, now.day)
+today_start = datetime(now.year, now.month, now.day, tzinfo=pytz.UTC)  # Set timezone to UTC
 tomorrow_end = today_start + timedelta(days=2)
 
 events_result = service.events().list(
     calendarId='primary',
-    timeMin=today_start.isoformat() + "Z",
-    timeMax=tomorrow_end.isoformat() + "Z",
+    timeMin=today_start.isoformat(),
+    timeMax=tomorrow_end.isoformat(),
     singleEvents=True,
     orderBy='startTime'
 ).execute()
@@ -130,9 +131,9 @@ for event in events:
     summary = event.get('summary', 'No Title')
 
     try:
-        # Check if start is a valid datetime string
+        # Handle timezone-aware datetime conversion
         if start:
-            start_dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
+            start_dt = datetime.fromisoformat(start.replace("Z", "+00:00"))  # Offset-aware datetime
             if today_start <= start_dt <= tomorrow_end:
                 st.write(f"• {start}: {summary}")
                 event_texts.append(f"{start}: {summary}")
@@ -140,7 +141,6 @@ for event in events:
             st.error(f"Event missing valid start time: {event}")
 
     except ValueError as e:
-        # Log the error if the date format is incorrect or missing
         st.error(f"Error parsing event start time: {e}. Event: {event}")
     except Exception as e:
         st.error(f"Unexpected error with event: {e}. Event: {event}")
