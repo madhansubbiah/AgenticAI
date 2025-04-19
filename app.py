@@ -25,7 +25,7 @@ WEATHER_API_KEY = credentials_data.get('WEATHER_API_KEY', '')
 
 # Initialize Streamlit
 st.title("🧠 Agentic AI Daily Assistant")
-st.write(f"🔁 Redirect URI: {redirect_uri}")
+#st.write(f"🔁 Redirect URI: {redirect_uri}")
 
 # Authenticate user
 def authenticate_web():
@@ -65,7 +65,7 @@ if 'code' in st.query_params and 'credentials' not in st.session_state:
             with open('token.pickle', 'wb') as token:
                 pickle.dump(creds, token)
 
-            st.success("✅ Successfully authenticated!")
+            #st.success("✅ Successfully authenticated!")
         except Exception as e:
             st.error(f"Authentication failed: {e}")
     else:
