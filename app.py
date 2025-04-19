@@ -9,10 +9,8 @@ from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from google.auth.transport.requests import Request
 from transformers import pipeline
-from langgraph import LangGraph
-from langchain.chains import LLMChain
-from langchain.prompts import PromptTemplate
-from langchain.llms import OpenAI
+from langgraph.graph import StateGraph
+from langchain_core.runnables import RunnableLambda
 
 # Set up environment
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
@@ -140,22 +138,29 @@ for event in events:
     except Exception as e:
         st.warning(f"Unexpected error with event: {e}. Event: {event}")
 
-# LangGraph workflow for summarization
-def create_langgraph_summary(event_texts, news_texts):
-    langgraph = LangGraph()
-    
-    # Define a simple LangGraph workflow to summarize both events and news
-    langgraph.add_node("event_summary", lambda: summarize_texts(event_texts))
-    langgraph.add_node("news_summary", lambda: summarize_texts(news_texts))
-    
-    # Run the LangGraph flow
-    result = langgraph.run()
-    return result
-
 # Summarization function
 def summarize_texts(texts):
     summarizer = pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
     return summarizer(" ".join(texts), max_length=60, min_length=25, do_sample=False)[0]['summary_text']
+
+# LangGraph workflow for summarization
+def create_langgraph_summary(event_texts, news_texts):
+    def summarize_event():
+        return {"event_summary": summarize_texts(event_texts)}
+
+    def summarize_news():
+        return {"news_summary": summarize_texts(news_texts)}
+
+    graph = StateGraph()
+    graph.add_node("summarize_events", RunnableLambda(summarize_event))
+    graph.add_node("summarize_news", RunnableLambda(summarize_news))
+    graph.set_entry_point("summarize_events")
+    graph.add_edge("summarize_events", "summarize_news")
+    graph.set_finish_point("summarize_news")
+
+    runnable = graph.compile()
+    result = runnable.invoke({})
+    return result
 
 # Show LangGraph summary of events and news
 if event_texts:
