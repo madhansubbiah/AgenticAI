@@ -9,10 +9,11 @@ from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from google.auth.transport.requests import Request
 from transformers import pipeline
-import pytz
 
-# Setup
+# Set up environment
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
+
+# Load credentials
 with open('credentials.json') as f:
     credentials_data = json.load(f)
 
@@ -20,12 +21,12 @@ redirect_uri = credentials_data['web']['redirect_uris'][0]
 SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
 NEWS_API_KEY = credentials_data.get('NEWS_API_KEY', '')
 WEATHER_API_KEY = credentials_data.get('WEATHER_API_KEY', '')
-CITIES = ["New York", "Los Angeles", "Chicago", "Houston", "Phoenix", "Philadelphia", "San Antonio", "San Diego", "Dallas", "San Jose"]
 
+# Initialize Streamlit
 st.title("🧠 AI Daily Assistant")
 st.write(f"🔁 Redirect URI: {redirect_uri}")
 
-# Auth helper
+# Authenticate user
 def authenticate_web():
     flow = Flow.from_client_secrets_file(
         'credentials.json',
@@ -35,7 +36,7 @@ def authenticate_web():
     authorization_url, state = flow.authorization_url(access_type='offline', include_granted_scopes='true')
     return authorization_url, flow, state
 
-# OAuth Callback
+# Handle OAuth callback
 if 'code' in st.query_params and 'credentials' not in st.session_state:
     received_state = st.query_params.get('state')
     if os.path.exists('state_temp.json'):
@@ -59,19 +60,22 @@ if 'code' in st.query_params and 'credentials' not in st.session_state:
             flow.fetch_token(authorization_response=authorization_response)
             creds = flow.credentials
             st.session_state.credentials = creds
+
             with open('token.pickle', 'wb') as token:
                 pickle.dump(creds, token)
+
             st.success("✅ Successfully authenticated!")
         except Exception as e:
             st.error(f"Authentication failed: {e}")
     else:
         st.error("State mismatch! Possible CSRF attack.")
 
-# Load credentials if available
+# Load saved credentials
 if 'credentials' not in st.session_state:
     if os.path.exists('token.pickle'):
         with open('token.pickle', 'rb') as token:
             creds = pickle.load(token)
+
         if creds and creds.valid:
             st.session_state.credentials = creds
         elif creds and creds.expired and creds.refresh_token:
@@ -80,7 +84,7 @@ if 'credentials' not in st.session_state:
             with open('token.pickle', 'wb') as token:
                 pickle.dump(creds, token)
 
-# Prompt for login if not authenticated
+# Prompt login
 if 'credentials' not in st.session_state:
     authorization_url, flow, state = authenticate_web()
     with open('state_temp.json', 'w') as f:
@@ -101,13 +105,12 @@ if 'credentials' not in st.session_state:
     st.info("Please authorize access to your Google Calendar.")
     st.stop()
 
-# -------- Calendar Section --------
+# Fetch calendar events
 creds = st.session_state.credentials
 service = build('calendar', 'v3', credentials=creds)
 
-utc = pytz.UTC
-now = datetime.utcnow().replace(tzinfo=utc)
-today_start = datetime(now.year, now.month, now.day, tzinfo=utc)
+now = datetime.utcnow()
+today_start = datetime(now.year, now.month, now.day, tzinfo=datetime.now().astimezone().tzinfo)
 tomorrow_end = today_start + timedelta(days=2)
 
 events_result = service.events().list(
@@ -123,15 +126,15 @@ events = events_result.get('items', [])
 st.subheader("📅 Today's & Tomorrow's Events")
 event_texts = []
 for event in events:
-    start = event['start'].get('dateTime', event['start'].get('date'))
-    summary = event.get('summary', 'No Title')
-    start_dt = datetime.fromisoformat(start)
-    if start_dt.tzinfo is None:
-        start_dt = utc.localize(start_dt)
-
-    if today_start <= start_dt <= tomorrow_end:
-        st.write(f"• {start_dt}: {summary}")
-        event_texts.append(f"{start_dt}: {summary}")
+    try:
+        start = event['start'].get('dateTime', event['start'].get('date'))
+        summary = event.get('summary', 'No Title')
+        start_dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
+        if today_start <= start_dt <= tomorrow_end:
+            st.write(f"• {start_dt.strftime('%Y-%m-%d %H:%M')} — {summary}")
+            event_texts.append(f"{start_dt.strftime('%Y-%m-%d %H:%M')} — {summary}")
+    except Exception as e:
+        st.warning(f"Unexpected error with event: {e}. Event: {event}")
 
 # Summarize events
 if event_texts:
@@ -142,7 +145,7 @@ if event_texts:
 else:
     st.write("No events for today and tomorrow.")
 
-# -------- News Section --------
+# Show top US news
 st.subheader("📰 Today's Top News")
 news_url = f"https://newsapi.org/v2/top-headlines?country=us&apiKey={NEWS_API_KEY}"
 response = requests.get(news_url)
@@ -164,26 +167,25 @@ else:
         news_summary = summarizer(full_news, max_length=60, min_length=25, do_sample=False)
         st.write(news_summary[0]['summary_text'])
 
-# -------- Weather Section (after everything else) --------
-st.subheader("🌦 Check Weather Info")
-selected_city = st.selectbox('Select a city to view its weather:', CITIES)
+# Weather input after calendar and news
+st.subheader("🌤️ Weather Forecast")
+cities = ["New York", "San Francisco", "Chicago", "Houston", "Miami", "Los Angeles", "Seattle", "Dallas", "Boston", "Denver"]
+selected_city = st.selectbox("Select a city to see the current weather:", cities)
 
 if selected_city:
-    weather_url = f"http://api.openweathermap.org/data/2.5/weather?q={selected_city}&appid={WEATHER_API_KEY}&units=metric"
+    weather_url = f"http://api.weatherapi.com/v1/current.json?key={WEATHER_API_KEY}&q={selected_city}"
     weather_response = requests.get(weather_url)
-    weather_data = weather_response.json()
 
-    if weather_data.get('cod') != 200:
-        st.warning(f"Could not fetch weather data for {selected_city}.")
-        st.write(f"Error: {weather_data.get('message')}")
+    if weather_response.status_code == 200:
+        weather_data = weather_response.json()
+        condition = weather_data['current']['condition']['text']
+        temp_c = weather_data['current']['temp_c']
+        feels_like = weather_data['current']['feelslike_c']
+        humidity = weather_data['current']['humidity']
+
+        st.markdown(f"**City:** {selected_city}")
+        st.markdown(f"**Condition:** {condition}")
+        st.markdown(f"**Temperature:** {temp_c}°C (Feels like {feels_like}°C)")
+        st.markdown(f"**Humidity:** {humidity}%")
     else:
-        st.subheader(f"🌤 Weather in {selected_city}")
-        temp = weather_data['main']['temp']
-        weather_desc = weather_data['weather'][0]['description']
-        humidity = weather_data['main']['humidity']
-        wind_speed = weather_data['wind']['speed']
-
-        st.write(f"Temperature: {temp}°C")
-        st.write(f"Weather: {weather_desc.capitalize()}")
-        st.write(f"Humidity: {humidity}%")
-        st.write(f"Wind Speed: {wind_speed} m/s")
+        st.error(f"Could not fetch weather data for {selected_city}. Please try again.")
