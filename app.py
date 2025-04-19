@@ -130,14 +130,20 @@ for event in events:
     summary = event.get('summary', 'No Title')
 
     try:
-        # Ensure that start is always a valid datetime object
-        start_dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
-        if today_start <= start_dt <= tomorrow_end:
-            st.write(f"• {start}: {summary}")
-            event_texts.append(f"{start}: {summary}")
+        # Check if start is a valid datetime string
+        if start:
+            start_dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
+            if today_start <= start_dt <= tomorrow_end:
+                st.write(f"• {start}: {summary}")
+                event_texts.append(f"{start}: {summary}")
+        else:
+            st.error(f"Event missing valid start time: {event}")
+
     except ValueError as e:
         # Log the error if the date format is incorrect or missing
         st.error(f"Error parsing event start time: {e}. Event: {event}")
+    except Exception as e:
+        st.error(f"Unexpected error with event: {e}. Event: {event}")
 
 # Summarize events
 if event_texts:
