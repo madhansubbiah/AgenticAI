@@ -9,6 +9,7 @@ from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from google.auth.transport.requests import Request
 from transformers import pipeline
+import pytz
 
 # Environment setup
 os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
@@ -18,18 +19,42 @@ with open('credentials.json') as f:
     credentials_data = json.load(f)
 
 redirect_uri = credentials_data['web']['redirect_uris'][0]
+SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
 NEWS_API_KEY = credentials_data.get('NEWS_API_KEY', '')
-WEATHER_API_KEY = credentials_data.get('WEATHER_API_KEY', '')
+WEATHER_API_KEY = credentials_data.get('WEATHER_API_KEY', '')  # Add this line to get weather API key
+CITIES = ["New York", "Los Angeles", "Chicago", "Houston", "Phoenix", "Philadelphia", "San Antonio", "San Diego", "Dallas", "San Jose"]
 
 # UI Title
 st.title("🧠 AI Daily Assistant")
 st.write(f"🔁 Redirect URI: {redirect_uri}")
 
+# Ask user for the city first
+selected_city = st.selectbox('Select your city:', CITIES)
+if selected_city:
+    # Fetch weather data for the selected city
+    weather_url = f"http://api.openweathermap.org/data/2.5/weather?q={selected_city}&appid={WEATHER_API_KEY}&units=metric"
+    weather_response = requests.get(weather_url)
+    weather_data = weather_response.json()
+
+    if weather_data.get('cod') != 200:
+        st.warning(f"Could not fetch weather data for {selected_city}. Please try again.")
+    else:
+        st.subheader(f"🌤 Weather in {selected_city}")
+        temp = weather_data['main']['temp']
+        weather_desc = weather_data['weather'][0]['description']
+        humidity = weather_data['main']['humidity']
+        wind_speed = weather_data['wind']['speed']
+
+        st.write(f"Temperature: {temp}°C")
+        st.write(f"Weather: {weather_desc.capitalize()}")
+        st.write(f"Humidity: {humidity}%")
+        st.write(f"Wind Speed: {wind_speed} m/s")
+
 # Auth helper
 def authenticate_web():
     flow = Flow.from_client_secrets_file(
         'credentials.json',
-        scopes=['https://www.googleapis.com/auth/calendar.readonly'],
+        scopes=SCOPES,
         redirect_uri=redirect_uri
     )
     authorization_url, state = flow.authorization_url(access_type='offline', include_granted_scopes='true')
@@ -48,7 +73,7 @@ if 'code' in st.query_params and 'credentials' not in st.session_state:
     if stored_state == received_state:
         flow = Flow.from_client_secrets_file(
             'credentials.json',
-            scopes=['https://www.googleapis.com/auth/calendar.readonly'],
+            scopes=SCOPES,
             redirect_uri=redirect_uri
         )
         query_dict = st.query_params
@@ -109,14 +134,15 @@ if 'credentials' not in st.session_state:
 creds = st.session_state.credentials
 service = build('calendar', 'v3', credentials=creds)
 
-now = datetime.utcnow()
-today_start = datetime(now.year, now.month, now.day)
+utc = pytz.UTC
+now = datetime.utcnow().replace(tzinfo=utc)  # Add UTC timezone to current time
+today_start = datetime(now.year, now.month, now.day, tzinfo=utc)  # Ensure it's timezone-aware
 tomorrow_end = today_start + timedelta(days=2)
 
 events_result = service.events().list(
     calendarId='primary',
-    timeMin=today_start.isoformat() + "Z",
-    timeMax=tomorrow_end.isoformat() + "Z",
+    timeMin=today_start.isoformat(),  # Use ISO format with timezone info
+    timeMax=tomorrow_end.isoformat(),  # Use ISO format with timezone info
     singleEvents=True,
     orderBy='startTime'
 ).execute()
@@ -128,10 +154,14 @@ event_texts = []
 for event in events:
     start = event['start'].get('dateTime', event['start'].get('date'))
     summary = event.get('summary', 'No Title')
-    start_dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
+    start_dt = datetime.fromisoformat(start)  # Parse the datetime from the event
+    if start_dt.tzinfo is None:  # If the event start time is naive, make it aware (UTC)
+        start_dt = utc.localize(start_dt)
+
+    # Ensure both datetimes are in the same timezone for comparison
     if today_start <= start_dt <= tomorrow_end:
-        st.write(f"• {start}: {summary}")
-        event_texts.append(f"{start}: {summary}")
+        st.write(f"• {start_dt}: {summary}")
+        event_texts.append(f"{start_dt}: {summary}")
 
 # Summarize events
 if event_texts:
@@ -164,26 +194,3 @@ else:
         full_news = " ".join(news_texts)
         news_summary = summarizer(full_news, max_length=60, min_length=25, do_sample=False)
         st.write(news_summary[0]['summary_text'])
-
-# Weather - Get city from user input
-st.subheader("🌤️ Weather Information")
-city = st.text_input("Enter city name:", "New York")  # Default to New York
-
-if city:
-    weather_url = f"http://api.weatherapi.com/v1/current.json?key={WEATHER_API_KEY}&q={city}&aqi=no"
-    weather_response = requests.get(weather_url)
-    weather_data = weather_response.json()
-
-    if 'error' not in weather_data:
-        temperature = weather_data['current']['temp_c']
-        condition = weather_data['current']['condition']['text']
-        humidity = weather_data['current']['humidity']
-        wind_speed = weather_data['current']['wind_kph']
-
-        st.write(f"Weather in {city}:")
-        st.write(f"Temperature: {temperature}°C")
-        st.write(f"Condition: {condition}")
-        st.write(f"Humidity: {humidity}%")
-        st.write(f"Wind Speed: {wind_speed} km/h")
-    else:
-        st.error(f"Error retrieving weather data for {city}.")
