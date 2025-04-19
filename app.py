@@ -140,29 +140,34 @@ for event in events:
 
 # Summarization function
 def summarize_texts(texts):
+    if not texts:
+        return "No data to summarize."
     summarizer = pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
     return summarizer(" ".join(texts), max_length=60, min_length=25, do_sample=False)[0]['summary_text']
 
-# LangGraph workflow for summarization
+# LangGraph summarization workflow
 def create_langgraph_summary(event_texts, news_texts):
-    def summarize_event():
-        return {"event_summary": summarize_texts(event_texts)}
+    def summarize_event_node(state):
+        return {"event_summary": summarize_texts(state.get("events", []))}
 
-    def summarize_news():
-        return {"news_summary": summarize_texts(news_texts)}
+    def summarize_news_node(state):
+        return {"news_summary": summarize_texts(state.get("news", []))}
 
     graph = StateGraph()
-    graph.add_node("summarize_events", RunnableLambda(summarize_event))
-    graph.add_node("summarize_news", RunnableLambda(summarize_news))
-    graph.set_entry_point("summarize_events")
-    graph.add_edge("summarize_events", "summarize_news")
-    graph.set_finish_point("summarize_news")
+    graph.add_node("event_summary", RunnableLambda(summarize_event_node))
+    graph.add_node("news_summary", RunnableLambda(summarize_news_node))
 
-    runnable = graph.compile()
-    result = runnable.invoke({})
-    return result
+    graph.set_entry_point("event_summary")
+    graph.set_finish_point("news_summary")
 
-# Show LangGraph summary of events and news
+    graph = graph.compile(
+        input={"events": list, "news": list},
+        output={"event_summary": str, "news_summary": str}
+    )
+
+    return graph.invoke({"events": event_texts, "news": news_texts})
+
+# Show LangGraph summary of events
 if event_texts:
     st.subheader("✨ Calendar Summary")
     event_summary = create_langgraph_summary(event_texts, [])
