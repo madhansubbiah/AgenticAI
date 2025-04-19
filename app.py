@@ -8,7 +8,8 @@ from urllib.parse import urlencode
 from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 from google.auth.transport.requests import Request
-from transformers import pipeline
+from langgraph.graph import Graph, Node, State
+from langgraph.graph.nodes import SummarizeNode
 from typing import TypedDict, List
 
 # Set up environment
@@ -25,7 +26,6 @@ WEATHER_API_KEY = credentials_data.get('WEATHER_API_KEY', '')
 
 # Initialize Streamlit
 st.title("🧠 Agentic AI Daily Assistant")
-#st.write(f"🔁 Redirect URI: {redirect_uri}")
 
 # Authenticate user
 def authenticate_web():
@@ -64,8 +64,6 @@ if 'code' in st.query_params and 'credentials' not in st.session_state:
 
             with open('token.pickle', 'wb') as token:
                 pickle.dump(creds, token)
-
-            #st.success("✅ Successfully authenticated!")
         except Exception as e:
             st.error(f"Authentication failed: {e}")
     else:
@@ -137,31 +135,29 @@ for event in events:
     except Exception as e:
         st.warning(f"Unexpected error with event: {e}. Event: {event}")
 
-# Summarization function
-def summarize_texts(texts):
-    if not texts:
-        return "No data to summarize."
-    
-    summarizer = pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
-    combined_text = " ".join(texts)
-
-    # Check if the text is long enough to summarize; else, just return the combined text
-    if len(combined_text.split()) > 50:
-        summary = summarizer(combined_text, max_length=80, min_length=40, do_sample=False)
-        return summary[0]['summary_text']
-    else:
-        return combined_text  # Return the original text if it's too short
-
-# LangGraph summarization using state
+# LangGraph Summarization
 def create_langgraph_summary(event_texts, news_texts):
-    # Generate summaries if there are texts available
-    event_summary = "No events to summarize." if not event_texts else summarize_texts(event_texts)
-    news_summary = "No news to summarize." if not news_texts else summarize_texts(news_texts)
+    # Initialize LangGraph
+    graph = Graph()
 
-    # Return the summaries
+    # Add summarization nodes for events and news
+    event_node = Node(SummarizeNode(), input_data=event_texts)
+    news_node = Node(SummarizeNode(), input_data=news_texts)
+
+    # Add nodes to graph
+    graph.add_node("event_summary", event_node)
+    graph.add_node("news_summary", news_node)
+
+    # Create state
+    state = State(graph)
+    
+    # Retrieve outputs
+    event_summary = state.get_node("event_summary").run()
+    news_summary = state.get_node("news_summary").run()
+
     return {
-        "event_summary_output": event_summary,
-        "news_summary_output": news_summary
+        "event_summary_output": event_summary or "No events to summarize.",
+        "news_summary_output": news_summary or "No news to summarize."
     }
 
 # Show LangGraph summary of events and news
