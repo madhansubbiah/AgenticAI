@@ -109,20 +109,15 @@ if code:
     flow.redirect_uri = redirect_uri
     credentials = flow.fetch_token(code=code)
 
-    # Convert OAuth2Token to Credentials
-    credentials = Credentials(
-        token=credentials.token,
-        refresh_token=credentials.refresh_token,
-        token_uri=credentials.token_uri,
-        client_id=credentials.client_id,
-        client_secret=credentials.client_secret
-    )
+    # Save the OAuth2Token directly
+    with open("token.pickle", "wb") as token_file:
+        pickle.dump(credentials, token_file)
 
     st.success("✅ Google authorization successful!")
 
-    # Save token for debugging (or future use)
-    with open("token.pickle", "wb") as token_file:
-        pickle.dump(credentials, token_file)
+    # Load the credentials from the token file
+    with open("token.pickle", "rb") as token_file:
+        credentials = pickle.load(token_file)
 
     # Show calendar events
     st.subheader("📅 Google Calendar Events")
