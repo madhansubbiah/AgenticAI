@@ -66,6 +66,10 @@ def get_calendar_service(credentials):
     return service
 
 def get_google_calendar_events(credentials):
+    # Ensure credentials are valid
+    if not credentials or not credentials.valid:
+        raise Exception("Invalid credentials")
+
     service = get_calendar_service(credentials)
     events_result = service.events().list(
         calendarId='primary',
@@ -139,4 +143,3 @@ if st.button("Summarize Text"):
             st.write(summary)
     else:
         st.warning("Please enter text to summarize.")
-
