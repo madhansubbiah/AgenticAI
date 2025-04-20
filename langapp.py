@@ -2,13 +2,19 @@ import streamlit as st
 import requests
 import time
 from langgraph.graph import StateGraph, END
+from typing import TypedDict
 
 # Retrieve the Hugging Face API token from Streamlit secrets
 API_TOKEN = st.secrets["general"]["HUGGINGFACE_API_KEY"]
 API_URL = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
 
+# Define the state schema
+class SummaryState(TypedDict):
+    text: str
+    summary: str
+
 # Function to call the Hugging Face Inference API
-def summarize_text(state):
+def summarize_text(state: SummaryState) -> SummaryState:
     text = state["text"]
     headers = {"Authorization": f"Bearer {API_TOKEN}"}
     payload = {"inputs": text}
@@ -27,7 +33,7 @@ def summarize_text(state):
 
 # Create a LangGraph pipeline
 def create_langgraph_pipeline():
-    builder = StateGraph()
+    builder = StateGraph(SummaryState)
     builder.add_node("summarize", summarize_text)
     builder.set_entry_point("summarize")
     builder.set_finish_point(END)
@@ -43,7 +49,7 @@ if st.button("Summarize Text"):
     if input_text:
         with st.spinner("Generating summary..."):
             langgraph = create_langgraph_pipeline()
-            result = langgraph.invoke({"text": input_text})
+            result = langgraph.invoke({"text": input_text, "summary": ""})
             summary = result.get("summary", "No summary returned.")
             st.subheader("Summary:")
             st.write(summary)
