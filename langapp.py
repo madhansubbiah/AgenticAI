@@ -1,5 +1,7 @@
 import streamlit as st
 import requests
+import time
+from langgraph import LangGraph, Node
 
 # Retrieve the Hugging Face API token from Streamlit secrets
 API_TOKEN = st.secrets["general"]["HUGGINGFACE_API_KEY"]
@@ -22,15 +24,33 @@ def summarize_text(text):
     
     return "Error: Service is currently unavailable after multiple attempts."
 
+# Create a LangGraph pipeline
+def create_langgraph_pipeline():
+    # Define a node for summarization
+    summarize_node = Node(
+        func=summarize_text,
+        input_key="text",
+        output_key="summary"
+    )
+
+    # Create a LangGraph
+    graph = LangGraph(nodes={"summarize": summarize_node})
+
+    return graph
+
 # --- Streamlit UI ---
-st.title("📝 Text Summarization with Hugging Face API")
+st.title("📝 Text Summarization with Hugging Face API and LangGraph")
 
 input_text = st.text_area("Enter text to summarize:", height=200)
 
 if st.button("Summarize Text"):
     if input_text:
         with st.spinner("Generating summary..."):
-            summary = summarize_text(input_text)
+            # Create the LangGraph pipeline
+            langgraph = create_langgraph_pipeline()
+            # Run the LangGraph with the input text
+            result = langgraph.run({"text": input_text})
+            summary = result["summary"]
             st.subheader("Summary:")
             st.write(summary)  # Display the summary
     else:
