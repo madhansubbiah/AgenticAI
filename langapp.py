@@ -1,7 +1,8 @@
 import streamlit as st
 import requests
 import time
-from google_auth_oauthlib.flow import Flow
+import os
+from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from langgraph.graph import StateGraph, END
 from typing import TypedDict
@@ -41,82 +42,69 @@ def create_langgraph_pipeline():
     builder.set_finish_point("summarize")  # ✅ Fix here
     return builder.compile()
 
-# === Google OAuth Setup ===
-SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
-CLIENT_SECRETS_FILE = "credentials.json"
+# --- Google Calendar Authentication and Fetch Events ---
+SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
 
-def get_google_calendar_service():
-    if "credentials" not in st.session_state:
-        flow = Flow.from_client_secrets_file(
-            CLIENT_SECRETS_FILE, scopes=SCOPES,
-            redirect_uri=st.experimental_get_url()
-        )
-        auth_url, _ = flow.authorization_url(prompt='consent')
-        st.session_state.flow = flow
-        # Make the URL clickable with Markdown
-        st.markdown(f"[Click here to authorize Google Calendar access]({auth_url})", unsafe_allow_html=True)
-        st.stop()
-    creds = st.session_state["credentials"]
-    return build("calendar", "v3", credentials=creds)
+def get_credentials():
+    """Retrieves credentials for Google Calendar API from session state or triggers OAuth flow."""
+    credentials = None
+    if "credentials" in st.session_state:
+        credentials = st.session_state["credentials"]
 
-def fetch_calendar_events(service):
-    events_result = service.events().list(calendarId="primary", timeMin="2025-01-01T00:00:00Z",
-                                          maxResults=10, singleEvents=True, orderBy="startTime").execute()
-    events = events_result.get("items", [])
+    if not credentials:
+        # Trigger OAuth flow if no credentials found
+        auth_url = get_google_auth_url()
+        if st.button("🔐 Authorize Google Calendar to continue."):
+            st.write(f"[Click here to authorize Google Calendar]({auth_url})")
+        return None
+    return credentials
 
-    if not events:
-        return "No upcoming events found."
+def get_google_auth_url():
+    """Generate Google OAuth URL for authentication."""
+    flow = InstalledAppFlow.from_client_secrets_file(
+        "credentials.json", SCOPES)  # Path to your credentials.json file
+    auth_url, _ = flow.authorization_url(access_type="offline", include_granted_scopes="true")
+    return auth_url
 
-    event_text = ""
-    for event in events:
-        start = event["start"].get("dateTime", event["start"].get("date"))
-        event_text += f"{start}: {event['summary']}\n"
-    return event_text
+def fetch_google_calendar_events(credentials):
+    """Fetch the next 10 events from the user's Google Calendar."""
+    service = build('calendar', 'v3', credentials=credentials)
+    events_result = service.events().list(
+        calendarId='primary', timeMin='2025-01-01T00:00:00Z',
+        maxResults=10, singleEvents=True, orderBy='startTime').execute()
+    events = events_result.get('items', [])
+    return events
 
-# Streamlit UI
+# --- Streamlit UI ---
 st.title("📅 Calendar + 📝 Text Summarizer with LangGraph")
 
-# --- Section: Google Calendar Events Summary ---
-st.subheader("1️⃣ Summarize Google Calendar Events")
+# Get Google Calendar credentials
+credentials = get_credentials()
 
-query_params = st.query_params  # ✅ updated from experimental_get_query_params
-if "code" in query_params and "flow" in st.session_state:
-    flow = st.session_state.flow
-    flow.fetch_token(authorization_response=st.experimental_get_url())
-    creds = flow.credentials
-    st.session_state["credentials"] = creds
-    st.success("✅ Authorized with Google Calendar!")
-
-if "credentials" in st.session_state:
-    try:
-        service = get_google_calendar_service()
-        with st.spinner("Fetching events..."):
-            calendar_text = fetch_calendar_events(service)
-            st.code(calendar_text)
-
-        if st.button("Summarize Calendar Events"):
-            with st.spinner("Summarizing..."):
-                langgraph = create_langgraph_pipeline()
-                result = langgraph.invoke({"text": calendar_text, "summary": ""})
-                st.subheader("📝 Calendar Summary:")
-                st.write(result.get("summary", "No summary returned."))
-    except Exception as e:
-        st.error(f"Error: {e}")
-else:
-    st.info("🔐 Authorize Google Calendar to continue.")
-
-# --- Section: Text Summarization ---
-st.subheader("2️⃣ Text Summarizer")
-
-input_text = st.text_area("Enter text to summarize:", height=200)
-
-if st.button("Summarize Text"):
-    if input_text:
-        with st.spinner("Generating summary..."):
-            langgraph = create_langgraph_pipeline()
-            result = langgraph.invoke({"text": input_text, "summary": ""})
-            summary = result.get("summary", "No summary returned.")
-            st.subheader("Summary:")
-            st.write(summary)
+if credentials:
+    # If authorized, fetch and display Google Calendar events
+    events = fetch_google_calendar_events(credentials)
+    if not events:
+        st.write("No upcoming events found.")
     else:
-        st.warning("Please enter some text to summarize.")
+        st.write("Upcoming events:")
+        for event in events:
+            summary = event.get('summary')
+            start = event['start'].get('dateTime', event['start'].get('date'))
+            st.write(f"{summary} at {start}")
+    
+    # Input for summarization
+    input_text = st.text_area("Enter text to summarize:", height=200)
+    
+    if st.button("Summarize Text"):
+        if input_text:
+            with st.spinner("Generating summary..."):
+                langgraph = create_langgraph_pipeline()
+                result = langgraph.invoke({"text": input_text, "summary": ""})
+                summary = result.get("summary", "No summary returned.")
+                st.subheader("Summary:")
+                st.write(summary)
+        else:
+            st.warning("Please enter some text to summarize.")
+else:
+    st.warning("Please authorize Google Calendar to continue.")
