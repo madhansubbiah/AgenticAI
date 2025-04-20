@@ -3,9 +3,9 @@ from transformers import pipeline
 import os
 
 # Set up proxy
-proxy = "http://webproxy.merck.com:8080"
-os.environ['HTTP_PROXY'] = proxy
-os.environ['HTTPS_PROXY'] = proxy
+# proxy = "http://webproxy.merck.com:8080"
+# os.environ['HTTP_PROXY'] = proxy
+# os.environ['HTTPS_PROXY'] = proxy
 
 # --- Initialize Summarization Pipeline ---
 summarizer_pipeline = pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
