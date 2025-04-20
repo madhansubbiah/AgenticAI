@@ -1,61 +1,25 @@
 import streamlit as st
-import requests
-import json
-from langgraph.graph import StateGraph
-from typing import TypedDict
+from transformers import pipeline
+import os
 
-# --- Load API key from Streamlit secrets ---
-HUGGINGFACE_API_KEY = st.secrets["general"]["HUGGINGFACE_API_KEY"]
+# Set up proxy
+proxy = "http://webproxy.merck.com:8080"
+os.environ['HTTP_PROXY'] = proxy
+os.environ['HTTPS_PROXY'] = proxy
 
-# Print the API key (for debugging purposes only)
-st.write("Hugging Face API Key:", HUGGINGFACE_API_KEY)
-
-# Update the API URL for the sentence-transformers model
-HF_API_URL = "https://api-inference.huggingface.co/models/sentence-transformers/all-mpnet-base-v2"
-headers = {
-    "Authorization": f"Bearer {HUGGINGFACE_API_KEY}",
-    "Content-Type": "application/json"
-}
-
-# --- State Schema ---
-class State(TypedDict):
-    input_text: str
-    embeddings: list
-
-# --- LangGraph Node ---
-def embed_node(state: State) -> State:
-    text = state["input_text"]
-
-    payload = {
-        "inputs": text
-    }
-
-    response = requests.post(HF_API_URL, headers=headers, json=payload)
-    response.raise_for_status()
-    embeddings = response.json()  # This will contain the embeddings
-
-    return {
-        "input_text": text,
-        "embeddings": embeddings
-    }
-
-# --- Build Graph ---
-builder = StateGraph(State)
-builder.add_node("embed", embed_node)
-builder.set_entry_point("embed")
-builder.set_finish_point("embed")
-graph = builder.compile()
+# --- Initialize Summarization Pipeline ---
+summarizer_pipeline = pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
 
 # --- Streamlit UI ---
-st.title("🧠 LangGraph + Hugging Face Sentence Embeddings")
+st.title("📝 Text Summarization with DistilBART")
 
-input_text = st.text_area("Enter text to get embeddings:", height=200)
+input_text = st.text_area("Enter text to summarize:", height=200)
 
-if st.button("Get Embeddings"):
+if st.button("Summarize Text"):
     if input_text:
-        with st.spinner("Generating embeddings..."):
-            result = graph.invoke({"input_text": input_text})
-            st.subheader("Embeddings:")
-            st.write(result["embeddings"])
+        with st.spinner("Generating summary..."):
+            summary = summarizer_pipeline(input_text, max_length=130, min_length=30, do_sample=False)
+            st.subheader("Summary:")
+            st.write(summary[0]['summary_text'])  # Display the summary
     else:
-        st.warning("Please enter some text to get embeddings.")
+        st.warning("Please enter some text to summarize.")
