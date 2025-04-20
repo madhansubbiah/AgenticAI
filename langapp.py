@@ -13,6 +13,7 @@ from google.oauth2.credentials import Credentials
 
 # Load secrets
 API_TOKEN = st.secrets["general"]["HUGGINGFACE_API_KEY"]
+NEWS_API_KEY = st.secrets["general"]["NEWS_API_KEY"]
 APP_URL = st.secrets["general"]["STREAMLIT_APP_URL"]
 ENV = st.secrets["general"].get("STREAMLIT_ENV", "development")
 API_URL = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
@@ -107,7 +108,7 @@ def get_google_calendar_events(credentials):
         raise
 
 # UI Start
-st.title("📅 Calendar + 📝 Summarizer with LangGraph")
+st.title("📅 Calendar + 📰 News Summarizer with LangGraph")
 
 if 'credentials' not in st.session_state:
     st.session_state.credentials = None
@@ -181,15 +182,31 @@ if st.session_state.credentials:
             st.query_params.clear()
             st.rerun()
 
-# Step 4: Manual Text Summarization
-st.subheader("✍️ Or Enter Text to Summarize")
-input_text = st.text_area("Enter text:", height=150, key="manual_text")
-if st.button("Summarize Manual Text"):
-    if input_text:
-        with st.spinner("Summarizing text..."):
+# Step 4: Top USA News Summarization
+st.subheader("🗞️ Today's Top USA News")
+
+def get_top_usa_news():
+    url = f"https://newsapi.org/v2/top-headlines?country=us&pageSize=10&apiKey={NEWS_API_KEY}"
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        articles = response.json().get("articles", [])
+        if not articles:
+            return "No top news found today."
+        combined_text = "\n".join(f"- {a['title']} ({a['source']['name']})" for a in articles if 'title' in a)
+        return combined_text
+    except Exception as e:
+        st.error(f"Failed to fetch news: {e}")
+        return ""
+
+if st.button("📰 Load and Summarize Top News"):
+    with st.spinner("Fetching and summarizing top news..."):
+        news_text = get_top_usa_news()
+        if news_text:
+            st.text_area("Top Headlines:", news_text, height=200)
             langgraph = create_langgraph_pipeline()
-            result = langgraph.invoke({"text": input_text, "summary": ""})
+            result = langgraph.invoke({"text": news_text, "summary": ""})
             st.subheader("📝 Summary:")
             st.write(result.get("summary", "No summary returned."))
-    else:
-        st.warning("Enter text to summarize.")
+        else:
+            st.warning("No news found to summarize.")
