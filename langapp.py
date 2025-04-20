@@ -19,7 +19,7 @@ ENV = st.secrets["general"].get("STREAMLIT_ENV", "development")
 API_URL = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
 SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
 
-# Debug
+# Debug info
 st.write("🔧 Environment:", ENV)
 st.write("🔧 App URL:", APP_URL)
 
@@ -108,7 +108,7 @@ def get_google_calendar_events(credentials):
         raise
 
 # UI Start
-st.title("📅 Calendar + 📰 News Summarizer with LangGraph")
+st.title("📅 Calendar + 🗞️ News Summarizer with LangGraph")
 
 if 'credentials' not in st.session_state:
     st.session_state.credentials = None
@@ -182,7 +182,7 @@ if st.session_state.credentials:
             st.query_params.clear()
             st.rerun()
 
-# Step 4: Top USA News Summarization
+# Step 4: Auto Load & Summarize Top USA News
 st.subheader("🗞️ Today's Top USA News")
 
 def get_top_usa_news():
@@ -199,14 +199,20 @@ def get_top_usa_news():
         st.error(f"Failed to fetch news: {e}")
         return ""
 
-if st.button("📰 Load and Summarize Top News"):
+# Run once per session
+if 'news_summary' not in st.session_state:
     with st.spinner("Fetching and summarizing top news..."):
         news_text = get_top_usa_news()
-        if news_text:
-            st.text_area("Top Headlines:", news_text, height=200)
+        if news_text and news_text != "No top news found today.":
             langgraph = create_langgraph_pipeline()
             result = langgraph.invoke({"text": news_text, "summary": ""})
-            st.subheader("📝 Summary:")
-            st.write(result.get("summary", "No summary returned."))
+            st.session_state["news_text"] = news_text
+            st.session_state["news_summary"] = result.get("summary", "No summary returned.")
         else:
-            st.warning("No news found to summarize.")
+            st.session_state["news_text"] = ""
+            st.session_state["news_summary"] = "No news found to summarize."
+
+# Display news + summary
+st.text_area("Top Headlines:", st.session_state.get("news_text", ""), height=200)
+st.subheader("📝 Summary:")
+st.write(st.session_state.get("news_summary", "No summary returned."))
