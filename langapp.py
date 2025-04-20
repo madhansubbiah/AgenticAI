@@ -8,6 +8,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 import pickle
 
+
 # Load secrets
 API_TOKEN = st.secrets["general"]["HUGGINGFACE_API_KEY"]
 APP_URL = st.secrets["general"]["STREAMLIT_APP_URL"]
