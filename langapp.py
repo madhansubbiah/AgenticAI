@@ -6,6 +6,7 @@ from langgraph.graph import StateGraph, END
 from typing import TypedDict
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
+from google.oauth2.credentials import Credentials
 import pickle
 
 # Load secrets
@@ -107,6 +108,16 @@ if code:
     flow = InstalledAppFlow.from_client_secrets_file("credentials.json", SCOPES)
     flow.redirect_uri = redirect_uri
     credentials = flow.fetch_token(code=code)
+
+    # Convert OAuth2Token to Credentials
+    credentials = Credentials(
+        token=credentials.token,
+        refresh_token=credentials.refresh_token,
+        token_uri=credentials.token_uri,
+        client_id=credentials.client_id,
+        client_secret=credentials.client_secret
+    )
+
     st.success("✅ Google authorization successful!")
 
     # Save token for debugging (or future use)
