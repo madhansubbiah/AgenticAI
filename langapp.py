@@ -83,7 +83,7 @@ st.title("📅 Calendar + 📝 Text Summarizer with LangGraph")
 # --- Section: Google Calendar Events Summary ---
 st.subheader("1️⃣ Summarize Google Calendar Events")
 
-query_params = st.experimental_get_query_params()
+query_params = st.query_params  # ✅ updated from experimental_get_query_params
 if "code" in query_params and "flow" in st.session_state:
     flow = st.session_state.flow
     flow.fetch_token(authorization_response=st.experimental_get_url())
