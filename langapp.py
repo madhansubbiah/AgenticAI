@@ -8,7 +8,6 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 import pickle
 
-
 # Load secrets
 API_TOKEN = st.secrets["general"]["HUGGINGFACE_API_KEY"]
 APP_URL = st.secrets["general"]["STREAMLIT_APP_URL"]
@@ -62,6 +61,7 @@ def get_google_auth_url():
     return auth_url, flow
 
 def get_calendar_service(credentials):
+    # Pass the credentials directly to build() without needing to call .authorize()
     return build("calendar", "v3", credentials=credentials)
 
 def get_google_calendar_events(credentials):
