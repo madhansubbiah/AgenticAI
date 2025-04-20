@@ -61,7 +61,7 @@ def get_google_auth_url():
     return auth_url, flow
 
 def get_calendar_service(credentials):
-    # Ensure credentials object works with googleapiclient
+    # Use the credentials directly here for the service
     service = build("calendar", "v3", credentials=credentials)
     return service
 
