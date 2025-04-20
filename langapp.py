@@ -2,12 +2,12 @@ import os
 import streamlit as st
 import requests
 import time
-from langgraph.graph import StateGraph, END
+from langgraph.graph import StateGraph
 from typing import TypedDict
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
-from google.oauth2.credentials import Credentials
 from google.auth.exceptions import RefreshError
+from google.oauth2.credentials import Credentials
 import pickle
 import datetime
 
@@ -17,7 +17,6 @@ ENV = st.secrets["general"].get("STREAMLIT_ENV", "development")
 API_URL = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn"
 SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
 
-# Debug: Show environment and secrets
 st.write("🔧 Environment:", ENV)
 st.write("🔧 App URL:", APP_URL)
 
@@ -66,6 +65,7 @@ def get_google_auth_url():
         flow = InstalledAppFlow.from_client_secrets_file("credentials.json", SCOPES)
         flow.redirect_uri = redirect_uri
         auth_url, _ = flow.authorization_url(access_type="offline", prompt='consent', include_granted_scopes="true")
+        st.session_state['oauth_flow'] = flow
         return auth_url
     except Exception as e:
         st.error(f"Error creating OAuth flow: {e}")
@@ -106,7 +106,6 @@ def get_google_calendar_events(credentials):
 
     except RefreshError:
         st.error("🔒 Authentication Error: Your session has expired or needs re-authorization.")
-        st.warning("Please try clicking the Authorize button again.")
         if os.path.exists("token.pickle"):
             os.remove("token.pickle")
             st.info("Removed stored token. Please re-authorize.")
@@ -118,14 +117,15 @@ def get_google_calendar_events(credentials):
         st.error(f"❌ An error occurred while fetching calendar events: {e}")
         raise
 
-# ---------------- Streamlit UI ---------------- #
+# ---------- Streamlit UI ---------- #
 
 st.title("📅 Calendar + 📝 Text Summarizer with LangGraph")
 
 if 'credentials' not in st.session_state:
     st.session_state.credentials = None
+if 'oauth_flow' not in st.session_state:
+    st.session_state.oauth_flow = None
 
-# Load existing token if available
 if not st.session_state.credentials and os.path.exists("token.pickle"):
     try:
         with open("token.pickle", "rb") as token_file:
@@ -143,21 +143,21 @@ if not st.session_state.credentials:
         auth_url = get_google_auth_url()
         if auth_url:
             st.markdown(f"👉 [Click here to authorize]({auth_url})")
-            st.info("After authorizing, you'll be redirected back here. The page might refresh.")
+            st.info("After authorizing, you'll be redirected back here.")
 
-# Step 2: Handle redirect and fetch token
+# Step 2: Handle redirect and Fetch Token
 query_params = st.query_params
 code = query_params.get("code")
 
 if code and not st.session_state.credentials:
     st.write("🔑 Received authorization code. Fetching token...")
-
     try:
         redirect_uri = APP_URL if ENV == "production" else "http://localhost:8501/"
         flow = InstalledAppFlow.from_client_secrets_file("credentials.json", SCOPES)
         flow.redirect_uri = redirect_uri
 
-        credentials = flow.fetch_token(code=code)
+        flow.fetch_token(code=code)  # Fetch and then retrieve
+        credentials = flow.credentials
         st.session_state.credentials = credentials
 
         with open("token.pickle", "wb") as token_file:
@@ -174,8 +174,10 @@ if code and not st.session_state.credentials:
             os.remove("token.pickle")
         if 'credentials' in st.session_state:
             del st.session_state['credentials']
+        if 'oauth_flow' in st.session_state:
+            del st.session_state['oauth_flow']
 
-# Step 3: Show calendar + summarization
+# Step 3: Fetch & Display Calendar Events
 if st.session_state.credentials:
     st.subheader("📅 Google Calendar Events")
     try:
@@ -199,10 +201,12 @@ if st.session_state.credentials:
                 os.remove("token.pickle")
             if 'credentials' in st.session_state:
                 del st.session_state['credentials']
+            if 'oauth_flow' in st.session_state:
+                del st.session_state['oauth_flow']
             st.query_params.clear()
             st.rerun()
 
-# Step 4: Manual text summarization
+# Step 4: Manual Summarization
 st.subheader("✍️ Or, Enter Any Text to Summarize")
 input_text = st.text_area("Enter text:", height=150, key="manual_text")
 
