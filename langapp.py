@@ -110,6 +110,10 @@ def get_google_calendar_events(credentials):
 # UI Start
 st.title("📅 Calendar + 🗞️ News Summarizer with LangGraph")
 
+# Clear credentials if a new user accesses the app
+if 'credentials' in st.session_state and st.session_state.credentials:
+    st.session_state.credentials = None  # Reset credentials for new users
+
 if 'credentials' not in st.session_state:
     st.session_state.credentials = None
 
@@ -216,4 +220,3 @@ if 'news_summary' not in st.session_state:
 st.text_area("Top Headlines:", st.session_state.get("news_text", ""), height=200)
 st.subheader("📝 Summary:")
 st.write(st.session_state.get("news_summary", "No summary returned."))
-
