@@ -216,3 +216,4 @@ if 'news_summary' not in st.session_state:
 st.text_area("Top Headlines:", st.session_state.get("news_text", ""), height=200)
 st.subheader("📝 Summary:")
 st.write(st.session_state.get("news_summary", "No summary returned."))
+
